@@ -1,0 +1,123 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { ROLES, ROUTES } from '../config/constants';
+import { getRoleDashboard } from '../utils/roleHelpers';
+
+import ProtectedRoute from './ProtectedRoute';
+
+// Layouts
+import AuthLayout from '../layouts/AuthLayout';
+import AdminLayout from '../layouts/AdminLayout';
+import HODLayout from '../layouts/HODLayout';
+import StaffLayout from '../layouts/StaffLayout';
+
+// Auth pages
+import LoginPage from '../pages/auth/LoginPage';
+
+// Admin pages
+import AdminDashboard from '../pages/admin/AdminDashboard';
+
+// HOD pages
+import HODDashboard from '../pages/hod/HODDashboard';
+
+// Staff pages
+import StaffDashboard from '../pages/staff/StaffDashboard';
+
+// Placeholder for future pages
+const ComingSoon = ({ title }) => (
+  <div className="flex flex-col items-center justify-center h-64 gap-md">
+    <span className="material-symbols-outlined text-[48px] text-outline">construction</span>
+    <h2 className="font-headline-sm text-headline-sm text-secondary">{title}</h2>
+    <p className="font-body-sm text-body-sm text-outline">This module will be available in a future update.</p>
+  </div>
+);
+
+const AppRoutes = () => {
+  const { isAuthenticated, user } = useAuth();
+
+  return (
+    <Routes>
+      {/* ── Root redirect ──────────────────────────────────────────── */}
+      <Route
+        path="/"
+        element={
+          isAuthenticated && user
+            ? <Navigate to={getRoleDashboard(user.role)} replace />
+            : <Navigate to={ROUTES.LOGIN} replace />
+        }
+      />
+
+      {/* ── Auth routes ────────────────────────────────────────────── */}
+      <Route element={<AuthLayout />}>
+        <Route path={ROUTES.LOGIN} element={<LoginPage />} />
+      </Route>
+
+      {/* ── Admin routes ───────────────────────────────────────────── */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN]}>
+            <AdminLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to={ROUTES.ADMIN_DASHBOARD} replace />} />
+        <Route path="dashboard"   element={<AdminDashboard />} />
+        <Route path="staff"       element={<ComingSoon title="Staff Management" />} />
+        <Route path="departments" element={<ComingSoon title="Department Management" />} />
+        <Route path="attendance"  element={<ComingSoon title="Attendance Management" />} />
+        <Route path="leave"       element={<ComingSoon title="Leave Management" />} />
+        <Route path="payroll"     element={<ComingSoon title="Payroll Processing" />} />
+        <Route path="shifts"      element={<ComingSoon title="Shift Scheduling" />} />
+      </Route>
+
+      {/* ── HOD routes ─────────────────────────────────────────────── */}
+      <Route
+        path="/hod"
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.HOD]}>
+            <HODLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to={ROUTES.HOD_DASHBOARD} replace />} />
+        <Route path="dashboard"  element={<HODDashboard />} />
+        <Route path="staff"      element={<ComingSoon title="Department Staff" />} />
+        <Route path="attendance" element={<ComingSoon title="Department Attendance" />} />
+        <Route path="leave"      element={<ComingSoon title="Leave Approvals" />} />
+        <Route path="schedule"   element={<ComingSoon title="Staff Schedules" />} />
+      </Route>
+
+      {/* ── Staff routes ───────────────────────────────────────────── */}
+      <Route
+        path="/staff"
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.STAFF]}>
+            <StaffLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to={ROUTES.STAFF_DASHBOARD} replace />} />
+        <Route path="dashboard"  element={<StaffDashboard />} />
+        <Route path="profile"    element={<ComingSoon title="My Profile" />} />
+        <Route path="attendance" element={<ComingSoon title="My Attendance" />} />
+        <Route path="leave"      element={<ComingSoon title="My Leave" />} />
+        <Route path="payroll"    element={<ComingSoon title="My Payroll" />} />
+      </Route>
+
+      {/* ── 404 ────────────────────────────────────────────────────── */}
+      <Route
+        path="*"
+        element={
+          <div className="min-h-screen flex flex-col items-center justify-center gap-md bg-background">
+            <span className="material-symbols-outlined text-[64px] text-outline">error</span>
+            <h1 className="font-headline-md text-headline-md text-on-surface">404 — Page Not Found</h1>
+            <a href="/" className="btn-primary">Go to Home</a>
+          </div>
+        }
+      />
+    </Routes>
+  );
+};
+
+export default AppRoutes;

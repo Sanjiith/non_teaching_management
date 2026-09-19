@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Google Fonts ─────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+/* ─── Base Reset ────────────────────────────────────────────────────── */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-on-background;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Material Symbols default variation settings */
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .material-symbols-filled {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+}
+
+/* ─── Stitch Component Classes ─────────────────────────────────────── */
+@layer components {
+
+  /* ── Buttons ───────────────────────────────────────────────────── */
+  .btn-primary {
+    @apply bg-primary-container text-on-primary font-semibold text-sm px-md py-sm rounded transition-all duration-200 hover:opacity-90 active:scale-95 flex items-center gap-sm;
+  }
+  .btn-secondary {
+    @apply bg-white border border-outline-variant text-primary font-semibold text-sm px-md py-sm rounded transition-all duration-200 hover:bg-surface-container-low active:scale-95 flex items-center gap-sm;
+  }
+  .btn-ghost {
+    @apply text-secondary font-semibold text-sm px-md py-sm rounded transition-all duration-200 hover:bg-surface-container-high active:scale-95 flex items-center gap-sm;
+  }
+  .btn-danger {
+    @apply bg-error text-on-error font-semibold text-sm px-md py-sm rounded transition-all duration-200 hover:opacity-90 active:scale-95 flex items-center gap-sm;
+  }
+
+  /* ── Cards ─────────────────────────────────────────────────────── */
+  .bit-card {
+    @apply bg-surface-container-lowest border border-outline-variant rounded p-md;
+  }
+  .bit-card-elevated {
+    @apply bg-white border border-outline-variant rounded-lg p-md shadow-sm;
+  }
+
+  /* ── Tables ─────────────────────────────────────────────────────── */
+  .bit-table {
+    @apply w-full border-collapse;
+  }
+  .bit-table thead th {
+    @apply bg-surface-container-low text-label-md font-label-md text-secondary uppercase tracking-wide border-b border-outline-variant px-md py-sm text-left;
+  }
+  .bit-table tbody td {
+    @apply text-body-md font-body-md text-on-surface border-b border-outline-variant px-md py-sm;
+  }
+  .bit-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .bit-table tbody tr:hover td {
+    @apply bg-surface-container-low;
+  }
+
+  /* ── Form Inputs ──────────────────────────────────────────────── */
+  .bit-input {
+    @apply w-full border border-outline-variant rounded bg-surface-container-lowest px-md py-sm text-body-md font-body-md text-on-surface outline-none transition-all duration-200;
+    height: 40px;
+  }
+  .bit-input:focus {
+    @apply border-primary-container;
+    box-shadow: 0 0 0 2px rgba(30, 58, 138, 0.10);
+  }
+  .bit-input::placeholder {
+    @apply text-outline;
+  }
+
+  /* ── Status Badges ──────────────────────────────────────────────── */
+  .badge-success  { @apply inline-flex items-center px-sm py-xs rounded text-label-md font-label-md bg-emerald-50  text-emerald-700; }
+  .badge-warning  { @apply inline-flex items-center px-sm py-xs rounded text-label-md font-label-md bg-amber-50   text-amber-700; }
+  .badge-error    { @apply inline-flex items-center px-sm py-xs rounded text-label-md font-label-md bg-red-50     text-red-700; }
+  .badge-info     { @apply inline-flex items-center px-sm py-xs rounded text-label-md font-label-md bg-blue-50    text-blue-700; }
+  .badge-neutral  { @apply inline-flex items-center px-sm py-xs rounded text-label-md font-label-md bg-surface-container text-secondary; }
+
+  /* ── Navigation Sidebar ─────────────────────────────────────────── */
+  .sidebar-nav-item {
+    @apply flex items-center gap-md p-md mx-sm my-xs text-secondary hover:bg-surface-container-high rounded-lg transition-all duration-200 active:scale-95 cursor-pointer;
+  }
+  .sidebar-nav-item span.material-symbols-outlined {
+    @apply text-xl;
+  }
+  .sidebar-nav-item .nav-label {
+    @apply font-label-md text-label-md;
+  }
+  .sidebar-nav-item.active {
+    @apply bg-primary-container text-on-primary-container font-bold;
+  }
+
+  /* ── KPI / Stat Cards ─────────────────────────────────────────── */
+  .kpi-card {
+    @apply bg-surface-container-lowest border border-outline-variant p-md rounded flex flex-col;
+  }
+  .kpi-card .kpi-label {
+    @apply font-label-md text-label-md text-secondary uppercase tracking-wider;
+  }
+  .kpi-card .kpi-value {
+    @apply font-display-lg text-display-lg text-on-surface mt-sm;
+  }
+  .kpi-card .kpi-sub {
+    @apply text-body-sm font-body-sm text-secondary mt-xs;
+  }
+
+  /* ── Page Layout ───────────────────────────────────────────────── */
+  .page-header {
+    @apply mb-lg;
+  }
+  .page-header h2 {
+    @apply font-headline-md text-headline-md text-on-surface;
+  }
+  .page-header p {
+    @apply font-body-sm text-body-sm text-secondary mt-xs;
+  }
+}
+
+/* ─── Scrollbar Styling ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f2f4f6; }
+::-webkit-scrollbar-thumb { background: #c5c5d3; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #757682; }
