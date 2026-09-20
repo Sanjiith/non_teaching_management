@@ -8,8 +8,9 @@ const { sendSuccess, sendError } = require('../utils/responseHelper');
  */
 const login = async (req, res) => {
   try {
-    const { employeeId, password } = req.body;
-    const { user, token } = await loginUser(employeeId, password);
+    const { employeeId, staffId, email, password } = req.body;
+    const identifier = employeeId || staffId || email;
+    const { user, token } = await loginUser(identifier, password);
 
     return sendSuccess(res, 200, 'Login successful', { user, token });
   } catch (error) {

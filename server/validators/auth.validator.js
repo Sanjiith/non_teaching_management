@@ -5,10 +5,13 @@ const { sendError } = require('../utils/responseHelper');
  * Login validation rules
  */
 const loginValidation = [
-  body('employeeId')
-    .notEmpty()
-    .withMessage('Employee ID is required')
-    .trim(),
+  body().custom((value, { req }) => {
+    const identifier = req.body.employeeId || req.body.staffId || req.body.email;
+    if (!identifier || (typeof identifier === 'string' && !identifier.trim())) {
+      throw new Error('Employee ID, Staff ID, or Email is required');
+    }
+    return true;
+  }),
   body('password')
     .notEmpty()
     .withMessage('Password is required')

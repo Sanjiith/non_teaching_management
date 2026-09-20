@@ -16,12 +16,18 @@ import LoginPage from '../pages/auth/LoginPage';
 
 // Admin pages
 import AdminDashboard from '../pages/admin/AdminDashboard';
+import AdminAttendancePage from '../pages/admin/AdminAttendancePage';
+import AdminLeavePage from '../pages/admin/AdminLeavePage';
 
 // HOD pages
 import HODDashboard from '../pages/hod/HODDashboard';
+import HODAttendancePage from '../pages/hod/HODAttendancePage';
+import HODLeavePage from '../pages/hod/HODLeavePage';
 
 // Staff pages
 import StaffDashboard from '../pages/staff/StaffDashboard';
+import StaffAttendancePage from '../pages/staff/StaffAttendancePage';
+import StaffLeavePage from '../pages/staff/StaffLeavePage';
 
 // Placeholder for future pages
 const ComingSoon = ({ title }) => (
@@ -65,8 +71,8 @@ const AppRoutes = () => {
         <Route path="dashboard"   element={<AdminDashboard />} />
         <Route path="staff"       element={<ComingSoon title="Staff Management" />} />
         <Route path="departments" element={<ComingSoon title="Department Management" />} />
-        <Route path="attendance"  element={<ComingSoon title="Attendance Management" />} />
-        <Route path="leave"       element={<ComingSoon title="Leave Management" />} />
+        <Route path="attendance"  element={<AdminAttendancePage />} />
+        <Route path="leave"       element={<AdminLeavePage />} />
         <Route path="payroll"     element={<ComingSoon title="Payroll Processing" />} />
         <Route path="shifts"      element={<ComingSoon title="Shift Scheduling" />} />
       </Route>
@@ -83,8 +89,8 @@ const AppRoutes = () => {
         <Route index element={<Navigate to={ROUTES.HOD_DASHBOARD} replace />} />
         <Route path="dashboard"  element={<HODDashboard />} />
         <Route path="staff"      element={<ComingSoon title="Department Staff" />} />
-        <Route path="attendance" element={<ComingSoon title="Department Attendance" />} />
-        <Route path="leave"      element={<ComingSoon title="Leave Approvals" />} />
+        <Route path="attendance" element={<HODAttendancePage />} />
+        <Route path="leave"      element={<HODLeavePage />} />
         <Route path="schedule"   element={<ComingSoon title="Staff Schedules" />} />
       </Route>
 
@@ -100,8 +106,8 @@ const AppRoutes = () => {
         <Route index element={<Navigate to={ROUTES.STAFF_DASHBOARD} replace />} />
         <Route path="dashboard"  element={<StaffDashboard />} />
         <Route path="profile"    element={<ComingSoon title="My Profile" />} />
-        <Route path="attendance" element={<ComingSoon title="My Attendance" />} />
-        <Route path="leave"      element={<ComingSoon title="My Leave" />} />
+        <Route path="attendance" element={<StaffAttendancePage />} />
+        <Route path="leave"      element={<StaffLeavePage />} />
         <Route path="payroll"    element={<ComingSoon title="My Payroll" />} />
       </Route>
 

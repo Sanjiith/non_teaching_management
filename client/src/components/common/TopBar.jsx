@@ -36,29 +36,33 @@ const TopBar = ({ pageTitle = 'Dashboard', onMenuToggle }) => {
       {/* ── Right actions ─────────────────────────────────────────── */}
       <div className="flex items-center gap-lg ml-auto">
 
-        {/* Search (desktop) */}
-        <div className="relative hidden sm:block">
-          <span className="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-outline text-xl">search</span>
-          <input
-            type="text"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-            placeholder="Search staff, depts..."
-            className="pl-9 pr-sm py-sm border border-outline-variant rounded bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container/10 text-body-sm font-body-sm w-56 outline-none transition-all"
-          />
-        </div>
+        {/* Search (desktop - hidden for Staff) */}
+        {user?.role !== 'Staff' && (
+          <div className="relative hidden sm:block">
+            <span className="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-outline text-xl">search</span>
+            <input
+              type="text"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+              placeholder="Search staff, depts..."
+              className="pl-9 pr-sm py-sm border border-outline-variant rounded bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container/10 text-body-sm font-body-sm w-56 outline-none transition-all"
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-sm text-secondary">
           {/* Notification bell */}
           <NotificationButton />
 
-          {/* Settings */}
-          <button
-            className="p-xs hover:bg-surface-container-low rounded-full transition-colors cursor-pointer active:opacity-80"
-            title="Settings"
-          >
-            <span className="material-symbols-outlined">settings</span>
-          </button>
+          {/* Settings (hidden for Staff) */}
+          {user?.role !== 'Staff' && (
+            <button
+              className="p-xs hover:bg-surface-container-low rounded-full transition-colors cursor-pointer active:opacity-80"
+              title="Settings"
+            >
+              <span className="material-symbols-outlined">settings</span>
+            </button>
+          )}
         </div>
 
         {/* Profile avatar */}

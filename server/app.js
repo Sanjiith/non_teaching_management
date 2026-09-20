@@ -14,6 +14,10 @@ require('./models/Notification.model');
 
 // Route imports
 const authRoutes = require('./routes/auth.routes');
+const userRoutes = require('./routes/user.routes');
+const departmentRoutes = require('./routes/department.routes');
+const attendanceRoutes = require('./routes/attendance.routes');
+const leaveRoutes = require('./routes/leave.routes');
 
 const app = express();
 
@@ -48,6 +52,10 @@ app.get('/api/health', (req, res) => {
 
 // API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/departments', departmentRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/leaves', leaveRoutes);
 
 // 404 handler
 app.use((req, res) => {

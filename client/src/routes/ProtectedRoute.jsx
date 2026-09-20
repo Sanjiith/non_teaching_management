@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../config/constants';
+import { getRoleDashboard } from '../utils/roleHelpers';
 
 /**
  * ProtectedRoute — redirects to login if not authenticated.
@@ -30,10 +31,9 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     return <Navigate to={ROUTES.LOGIN} state={{ from: location }} replace />;
   }
 
-  // Authenticated but wrong role
+  // Authenticated but wrong role — redirect to their own dashboard
   if (allowedRoles.length > 0 && !allowedRoles.includes(user?.role)) {
-    // Redirect to their own dashboard
-    return <Navigate to={ROUTES.LOGIN} replace />;
+    return <Navigate to={getRoleDashboard(user?.role)} replace />;
   }
 
   return children;

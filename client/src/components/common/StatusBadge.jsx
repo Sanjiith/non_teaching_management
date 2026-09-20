@@ -4,11 +4,14 @@
  */
 const statusConfig = {
   // Attendance
-  Present:    { cls: 'badge-success', icon: 'check_circle' },
-  Absent:     { cls: 'badge-error',   icon: 'cancel' },
-  Late:       { cls: 'badge-warning', icon: 'schedule' },
-  'Half-Day': { cls: 'badge-warning', icon: 'timelapse' },
-  'On-Leave': { cls: 'badge-info',    icon: 'flight_takeoff' },
+  Present:      { cls: 'badge-success', icon: 'check_circle' },
+  Absent:       { cls: 'badge-error',   icon: 'cancel' },
+  Leave:        { cls: 'badge-info',    icon: 'flight_takeoff' },
+  'On-Leave':   { cls: 'badge-info',    icon: 'flight_takeoff' },
+  Holiday:      { cls: 'badge-neutral', icon: 'beach_access' },
+  'Weekly Off': { cls: 'badge-neutral', icon: 'event_busy' },
+  Late:         { cls: 'badge-warning', icon: 'schedule' },
+  'Half-Day':   { cls: 'badge-warning', icon: 'timelapse' },
   // Leave
   Pending:    { cls: 'badge-warning', icon: 'pending' },
   Approved:   { cls: 'badge-success', icon: 'task_alt' },

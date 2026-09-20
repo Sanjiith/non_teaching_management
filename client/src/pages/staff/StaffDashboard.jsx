@@ -1,6 +1,11 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getRoleLabel } from '../../utils/roleHelpers';
+import { ROUTES } from '../../config/constants';
+import { getMyAttendance } from '../../services/attendance.service';
+import { getMyLeaves, applyLeave } from '../../services/leave.service';
 
 const InfoRow = ({ label, value }) => (
   <div className="flex flex-col sm:flex-row sm:items-center py-sm border-b border-outline-variant last:border-0">
@@ -9,27 +14,117 @@ const InfoRow = ({ label, value }) => (
   </div>
 );
 
-const attendanceThisMonth = [
-  { date: 'Sep 19', day: 'Fri', status: 'Present' },
-  { date: 'Sep 18', day: 'Thu', status: 'Present' },
-  { date: 'Sep 17', day: 'Wed', status: 'Present' },
-  { date: 'Sep 16', day: 'Tue', status: 'Absent' },
-  { date: 'Sep 15', day: 'Mon', status: 'Present' },
-  { date: 'Sep 12', day: 'Fri', status: 'Present' },
-  { date: 'Sep 11', day: 'Thu', status: 'On-Leave' },
-];
-
-const recentLeaves = [
-  { type: 'Casual Leave', from: 'Sep 11', to: 'Sep 11', days: 1, status: 'Approved' },
-  { type: 'Medical Leave', from: 'Aug 5', to: 'Aug 7', days: 3, status: 'Approved' },
-];
-
 const StaffDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [attendanceStats, setAttendanceStats] = useState({
+    presentDays: 0,
+    absentDays: 0,
+    leaveDays: 0,
+    attendanceRate: 100,
+  });
+  const [leavesList, setLeavesList] = useState([]);
+  const [balances, setBalances] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Apply Leave Modal state
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formSuccess, setFormSuccess] = useState('');
+  const [leaveForm, setLeaveForm] = useState({
+    type: 'Casual Leave',
+    startDate: '',
+    startTime: '09:00 AM',
+    endDate: '',
+    endTime: '05:00 PM',
+    reason: '',
+  });
+
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [attData, leavesData] = await Promise.all([
+        getMyAttendance({ limit: 7 }),
+        getMyLeaves({ limit: 5 }),
+      ]);
+
+      setAttendanceRecords(attData.records || []);
+      if (attData.stats) setAttendanceStats(attData.stats);
+      setLeavesList(leavesData.leaves || []);
+      if (leavesData.leaveBalances) {
+        setBalances(leavesData.leaveBalances);
+      } else if (user?.leaveBalances) {
+        setBalances(user.leaveBalances);
+      }
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  const handleApplySubmit = async (e) => {
+    e.preventDefault();
+    setFormError('');
+    setFormSuccess('');
+
+    if (!leaveForm.startDate) return setFormError('Start date is required.');
+    if (!leaveForm.endDate) return setFormError('End date is required.');
+    if (!leaveForm.reason.trim()) return setFormError('Reason is required.');
+
+    setSubmitting(true);
+    try {
+      await applyLeave(leaveForm);
+      setFormSuccess('Leave application submitted successfully!');
+      setTimeout(() => {
+        setIsModalOpen(false);
+        setFormSuccess('');
+        setLeaveForm({
+          type: 'Casual Leave',
+          startDate: '',
+          startTime: '09:00 AM',
+          endDate: '',
+          endTime: '05:00 PM',
+          reason: '',
+        });
+        loadDashboardData();
+      }, 1000);
+    } catch (err) {
+      setFormError(err.response?.data?.message || err.message || 'Failed to submit leave.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
+
+  // Dynamic balances map
+  const balanceItems = [
+    {
+      type: 'Casual Leave',
+      total: balances?.casualLeave?.total ?? 12,
+      used: balances?.casualLeave?.used ?? 0,
+    },
+    {
+      type: 'Medical Leave',
+      total: balances?.medicalLeave?.total ?? 12,
+      used: balances?.medicalLeave?.used ?? 0,
+    },
+    {
+      type: 'Earned Leave',
+      total: balances?.earnedLeave?.total ?? 30,
+      used: balances?.earnedLeave?.used ?? 0,
+    },
+  ];
 
   return (
     <div className="space-y-lg">
@@ -53,28 +148,19 @@ const StaffDashboard = () => {
             <span className="badge-info mt-sm">{user?.department?.name || 'Department'}</span>
 
             <div className="w-full mt-lg border-t border-outline-variant pt-md">
-              <InfoRow label="Employee ID" value={user?.employeeId} />
+              <InfoRow label="Employee ID" value={user?.employeeId || user?.staffId} />
               <InfoRow label="Email"       value={user?.email} />
               <InfoRow label="Phone"       value={user?.phone} />
             </div>
-
-            <button className="btn-secondary w-full justify-center mt-md">
-              <span className="material-symbols-outlined text-xl">edit</span>
-              Edit Profile
-            </button>
           </div>
 
           {/* Leave Balance card */}
           <div className="bit-card mt-md">
             <h3 className="font-title-md text-title-md text-on-surface mb-md">Leave Balance</h3>
             <div className="space-y-sm">
-              {[
-                { type: 'Casual Leave',   total: 12, used: 3  },
-                { type: 'Medical Leave',  total: 12, used: 3  },
-                { type: 'Earned Leave',   total: 30, used: 5  },
-              ].map(({ type, total, used }) => {
-                const remaining = total - used;
-                const pct = Math.round((remaining / total) * 100);
+              {balanceItems.map(({ type, total, used }) => {
+                const remaining = Math.max(0, total - used);
+                const pct = total > 0 ? Math.round((remaining / total) * 100) : 0;
                 return (
                   <div key={type}>
                     <div className="flex justify-between mb-xs">
@@ -91,7 +177,10 @@ const StaffDashboard = () => {
                 );
               })}
             </div>
-            <button className="btn-primary w-full justify-center mt-md">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="btn-primary w-full justify-center mt-md"
+            >
               <span className="material-symbols-outlined text-xl">add</span>
               Apply for Leave
             </button>
@@ -103,83 +192,231 @@ const StaffDashboard = () => {
           {/* Quick stats */}
           <div className="grid grid-cols-3 gap-md">
             <div className="kpi-card">
-              <div className="kpi-label">This Month</div>
-              <div className="kpi-value text-primary-container">18</div>
-              <div className="kpi-sub">Days present</div>
+              <div className="kpi-label">Days Present</div>
+              <div className="kpi-value text-primary-container">{attendanceStats.presentDays}</div>
+              <div className="kpi-sub">Total recorded</div>
             </div>
             <div className="kpi-card">
-              <div className="kpi-label">Absent</div>
-              <div className="kpi-value text-error">1</div>
-              <div className="kpi-sub">This month</div>
+              <div className="kpi-label">Days on Leave</div>
+              <div className="kpi-value text-amber-600">{attendanceStats.leaveDays}</div>
+              <div className="kpi-sub">Approved leaves</div>
             </div>
             <div className="kpi-card">
-              <div className="kpi-label">Leave Taken</div>
-              <div className="kpi-value text-amber-600">1</div>
-              <div className="kpi-sub">This month</div>
+              <div className="kpi-label">Attendance Rate</div>
+              <div className="kpi-value text-emerald-700">{attendanceStats.attendanceRate}%</div>
+              <div className="kpi-sub">Dynamic rate</div>
             </div>
           </div>
 
-          {/* Attendance log */}
+          {/* Actual Attendance log */}
           <div className="bit-card">
             <div className="flex items-center justify-between mb-md">
               <h3 className="font-title-md text-title-md text-on-surface">Recent Attendance</h3>
-              <button className="btn-ghost text-xs">View all</button>
+              <button
+                onClick={() => navigate(ROUTES.STAFF_ATTENDANCE)}
+                className="btn-ghost text-xs"
+              >
+                View all
+              </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="bit-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Day</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attendanceThisMonth.map((row, i) => (
-                    <tr key={i}>
-                      <td className="font-medium">{row.date}</td>
-                      <td className="text-secondary">{row.day}</td>
-                      <td><StatusBadge status={row.status} /></td>
+              {attendanceRecords.length === 0 ? (
+                <p className="text-secondary text-center py-md font-body-sm">No attendance records found.</p>
+              ) : (
+                <table className="bit-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th>Remarks</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {attendanceRecords.map((row) => {
+                      const d = new Date(row.date);
+                      const formattedDate = d.toLocaleDateString('en-IN', {
+                        month: 'short', day: 'numeric', weekday: 'short',
+                      });
+                      return (
+                        <tr key={row._id}>
+                          <td className="font-medium">{formattedDate}</td>
+                          <td><StatusBadge status={row.status} /></td>
+                          <td className="text-secondary text-sm">{row.remarks || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 
-          {/* Leave history */}
+          {/* Actual Leave history */}
           <div className="bit-card">
             <div className="flex items-center justify-between mb-md">
               <h3 className="font-title-md text-title-md text-on-surface">Recent Leave Requests</h3>
-              <button className="btn-ghost text-xs">View all</button>
+              <button
+                onClick={() => navigate(ROUTES.STAFF_LEAVE)}
+                className="btn-ghost text-xs"
+              >
+                View all
+              </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="bit-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>From</th>
-                    <th>To</th>
-                    <th>Days</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentLeaves.map((row, i) => (
-                    <tr key={i}>
-                      <td className="font-medium">{row.type}</td>
-                      <td className="text-secondary">{row.from}</td>
-                      <td className="text-secondary">{row.to}</td>
-                      <td>{row.days}</td>
-                      <td><StatusBadge status={row.status} /></td>
+              {leavesList.length === 0 ? (
+                <p className="text-secondary text-center py-md font-body-sm">No leave requests submitted yet.</p>
+              ) : (
+                <table className="bit-table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>From</th>
+                      <th>To</th>
+                      <th>Days</th>
+                      <th>Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {leavesList.map((row) => {
+                      const fromStr = new Date(row.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                      const toStr = new Date(row.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                      return (
+                        <tr key={row._id}>
+                          <td className="font-medium">{row.type}</td>
+                          <td className="text-secondary">{fromStr}</td>
+                          <td className="text-secondary">{toStr}</td>
+                          <td>{row.totalDays}</td>
+                          <td><StatusBadge status={row.status} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* ── Apply for Leave Modal ───────────────────────────────── */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-md">
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-lg p-lg max-w-lg w-full shadow-lg animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between mb-md">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface">Apply for Leave</h3>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="p-xs text-secondary hover:text-on-surface rounded"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleApplySubmit} className="space-y-md">
+              <div>
+                <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Leave Type</label>
+                <select
+                  value={leaveForm.type}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value })}
+                  className="bit-input"
+                >
+                  <option value="Casual Leave">Casual Leave</option>
+                  <option value="Medical Leave">Medical Leave</option>
+                  <option value="Earned Leave">Earned Leave</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Start Date</label>
+                  <input
+                    type="date"
+                    value={leaveForm.startDate}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, startDate: e.target.value })}
+                    className="bit-input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">End Date</label>
+                  <input
+                    type="date"
+                    value={leaveForm.endDate}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, endDate: e.target.value })}
+                    className="bit-input"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Start Time</label>
+                  <input
+                    type="text"
+                    value={leaveForm.startTime}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, startTime: e.target.value })}
+                    placeholder="09:00 AM"
+                    className="bit-input"
+                  />
+                </div>
+                <div>
+                  <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">End Time</label>
+                  <input
+                    type="text"
+                    value={leaveForm.endTime}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, endTime: e.target.value })}
+                    placeholder="05:00 PM"
+                    className="bit-input"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Reason</label>
+                <textarea
+                  rows="3"
+                  value={leaveForm.reason}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                  placeholder="Provide reason for leave..."
+                  className="bit-input py-xs"
+                  required
+                />
+              </div>
+
+              {formError && (
+                <div className="p-sm bg-error-container text-on-error-container rounded text-body-sm">
+                  {formError}
+                </div>
+              )}
+
+              {formSuccess && (
+                <div className="p-sm bg-emerald-50 text-emerald-800 rounded text-body-sm">
+                  {formSuccess}
+                </div>
+              )}
+
+              <div className="flex gap-sm justify-end pt-sm border-t border-outline-variant">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn-primary"
+                >
+                  {submitting ? 'Submitting...' : 'Submit Application'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

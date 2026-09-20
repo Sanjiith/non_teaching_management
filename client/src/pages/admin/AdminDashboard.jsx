@@ -1,7 +1,11 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
+import { ROUTES } from '../../config/constants';
+import { getAttendanceStats } from '../../services/attendance.service';
+import { getAllLeaves, approveLeave, rejectLeave } from '../../services/leave.service';
 
-// KPI Card component
 const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) => (
   <div className="kpi-card">
     <div className="flex justify-between items-start mb-sm">
@@ -13,7 +17,6 @@ const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) =>
   </div>
 );
 
-// Stat section card
 const SectionCard = ({ title, children, action }) => (
   <div className="bit-card">
     <div className="flex items-center justify-between mb-md">
@@ -23,13 +26,6 @@ const SectionCard = ({ title, children, action }) => (
     {children}
   </div>
 );
-
-const recentLeaves = [
-  { name: 'Rajesh Kumar',   dept: 'CSE', type: 'Casual Leave',  dates: 'Sep 18–19',  status: 'Pending'  },
-  { name: 'Meena Devi',     dept: 'CSE', type: 'Medical Leave', dates: 'Sep 15–17',  status: 'Approved' },
-  { name: 'Suresh Babu',    dept: 'ECE', type: 'Earned Leave',  dates: 'Sep 10–12',  status: 'Approved' },
-  { name: 'Lakshmi Priya',  dept: 'ME',  type: 'Casual Leave',  dates: 'Sep 8',      status: 'Rejected' },
-];
 
 const deptStats = [
   { dept: 'CSE', total: 24, present: 22, absent: 1, leave: 1 },
@@ -41,6 +37,62 @@ const deptStats = [
 
 const AdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const [stats, setStats] = useState({
+    totalStaff: 0,
+    presentToday: 0,
+    absentToday: 0,
+    onLeaveToday: 0,
+    attendanceRateToday: 0,
+  });
+  const [recentLeaves, setRecentLeaves] = useState([]);
+  const [processingId, setProcessingId] = useState(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [statsData, leavesData] = await Promise.all([
+        getAttendanceStats(),
+        getAllLeaves({ limit: 5 }),
+      ]);
+      if (statsData) setStats(statsData);
+      if (leavesData.leaves) setRecentLeaves(leavesData.leaves);
+    } catch (err) {
+      console.error('Failed to load admin dashboard data:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleApprove = async (id) => {
+    setProcessingId(id);
+    try {
+      await approveLeave(id, 'Approved by Administrator');
+      loadData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to approve leave.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleReject = async (id) => {
+    const reason = window.prompt('Enter rejection remarks:', 'Administrative decision');
+    if (reason === null) return;
+
+    setProcessingId(id);
+    try {
+      await rejectLeave(id, reason);
+      loadData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to reject leave.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
@@ -56,65 +108,125 @@ const AdminDashboard = () => {
             </h2>
             <p className="font-body-sm text-body-sm text-secondary mt-xs">{today}</p>
           </div>
-          <button className="btn-primary hidden sm:flex">
-            <span className="material-symbols-outlined text-sm">download</span>
-            Export Report
+          <button
+            onClick={() => navigate(ROUTES.ADMIN_ATTENDANCE)}
+            className="btn-primary hidden sm:flex"
+          >
+            <span className="material-symbols-outlined text-sm">calendar_month</span>
+            Attendance Log
           </button>
         </div>
       </div>
 
       {/* ── KPI Grid ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-md">
-        <KPICard label="Total Staff"       value="89"   icon="groups"          sub="Across all departments" />
-        <KPICard label="Present Today"     value="76"   icon="how_to_reg"      sub="85.4% attendance"       valueColor="text-primary-container" />
-        <KPICard label="Absent"            value="6"    icon="person_off"      sub="Requires attention"     valueColor="text-error" />
-        <KPICard label="On Leave"          value="7"    icon="flight_takeoff"  sub="Approved leaves" />
-        <KPICard label="Pending Requests"  value="4"    icon="pending_actions" sub="Awaiting approval"      valueColor="text-amber-600" />
+        <KPICard
+          label="Total Staff"
+          value={stats.totalStaff || 89}
+          icon="groups"
+          sub="Across all departments"
+        />
+        <KPICard
+          label="Present Today"
+          value={stats.presentToday || 0}
+          icon="how_to_reg"
+          sub={`${stats.attendanceRateToday || 0}% rate`}
+          valueColor="text-primary-container"
+        />
+        <KPICard
+          label="Absent"
+          value={stats.absentToday || 0}
+          icon="person_off"
+          sub="Requires attention"
+          valueColor="text-error"
+        />
+        <KPICard
+          label="On Leave"
+          value={stats.onLeaveToday || 0}
+          icon="flight_takeoff"
+          sub="Approved leaves"
+          valueColor="text-amber-600"
+        />
+        <KPICard
+          label="Pending Leaves"
+          value={recentLeaves.filter((l) => l.status === 'Pending').length}
+          icon="pending_actions"
+          sub="Awaiting review"
+          valueColor="text-amber-600"
+        />
       </div>
 
       {/* ── Mid row ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-md">
-
         {/* Recent Leave Requests */}
         <div className="lg:col-span-2">
           <SectionCard
             title="Recent Leave Requests"
             action={
-              <button className="btn-ghost text-xs">View all</button>
+              <button
+                onClick={() => navigate(ROUTES.ADMIN_LEAVE)}
+                className="btn-ghost text-xs"
+              >
+                View all
+              </button>
             }
           >
             <div className="overflow-x-auto">
-              <table className="bit-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Dept</th>
-                    <th>Type</th>
-                    <th>Dates</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentLeaves.map((row, i) => (
-                    <tr key={i}>
-                      <td className="font-medium">{row.name}</td>
-                      <td><span className="badge-neutral">{row.dept}</span></td>
-                      <td className="text-secondary">{row.type}</td>
-                      <td className="text-secondary">{row.dates}</td>
-                      <td><StatusBadge status={row.status} /></td>
-                      <td>
-                        {row.status === 'Pending' && (
-                          <div className="flex gap-xs">
-                            <button className="btn-secondary text-xs py-xs px-sm">Approve</button>
-                            <button className="btn-ghost text-xs py-xs px-sm">Reject</button>
-                          </div>
-                        )}
-                      </td>
+              {recentLeaves.length === 0 ? (
+                <p className="text-secondary text-center py-xl font-body-sm">
+                  No leave requests found.
+                </p>
+              ) : (
+                <table className="bit-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Dept</th>
+                      <th>Type</th>
+                      <th>Dates</th>
+                      <th>Status</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {recentLeaves.map((row) => {
+                      const fromStr = new Date(row.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                      const toStr = new Date(row.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                      const dateStr = fromStr === toStr ? fromStr : `${fromStr}–${toStr}`;
+
+                      return (
+                        <tr key={row._id}>
+                          <td className="font-medium">{row.user?.name || 'Staff Member'}</td>
+                          <td><span className="badge-neutral">{row.department?.code || '—'}</span></td>
+                          <td className="text-secondary">{row.type}</td>
+                          <td className="text-secondary">{dateStr}</td>
+                          <td><StatusBadge status={row.status} /></td>
+                          <td>
+                            {row.status === 'Pending' && (
+                              <div className="flex gap-xs">
+                                <button
+                                  onClick={() => handleApprove(row._id)}
+                                  disabled={processingId === row._id}
+                                  className="btn-secondary text-xs py-xs px-sm"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => handleReject(row._id)}
+                                  disabled={processingId === row._id}
+                                  className="btn-ghost text-xs py-xs px-sm text-error"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </SectionCard>
         </div>
@@ -123,13 +235,16 @@ const AdminDashboard = () => {
         <SectionCard title="Quick Actions">
           <div className="flex flex-col gap-sm">
             {[
-              { label: 'Add Staff Member',    icon: 'person_add',      cls: 'btn-primary' },
-              { label: 'Mark Attendance',     icon: 'how_to_reg',      cls: 'btn-secondary' },
-              { label: 'Process Payroll',     icon: 'payments',        cls: 'btn-secondary' },
-              { label: 'Create Shift',        icon: 'schedule',        cls: 'btn-secondary' },
-              { label: 'Send Notification',   icon: 'notifications',   cls: 'btn-ghost' },
-            ].map(({ label, icon, cls }) => (
-              <button key={label} className={`${cls} w-full justify-start`}>
+              { label: 'Attendance Management', icon: 'how_to_reg', path: ROUTES.ADMIN_ATTENDANCE, cls: 'btn-primary' },
+              { label: 'Leave Approvals',       icon: 'event_busy',  path: ROUTES.ADMIN_LEAVE,      cls: 'btn-secondary' },
+              { label: 'Staff Directory',        icon: 'group',       path: ROUTES.ADMIN_STAFF,      cls: 'btn-secondary' },
+              { label: 'Departments',            icon: 'account_balance', path: ROUTES.ADMIN_DEPARTMENTS, cls: 'btn-ghost' },
+            ].map(({ label, icon, path, cls }) => (
+              <button
+                key={label}
+                onClick={() => navigate(path)}
+                className={`${cls} w-full justify-start`}
+              >
                 <span className="material-symbols-outlined text-xl">{icon}</span>
                 {label}
               </button>
