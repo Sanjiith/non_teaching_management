@@ -11,6 +11,7 @@ const pageTitles = {
   [ROUTES.HOD_ATTENDANCE]: 'Staff Attendance',
   [ROUTES.HOD_LEAVE]:      'Leave Approvals',
   [ROUTES.HOD_SCHEDULE]:   'Staff Schedules',
+  [ROUTES.HOD_PAYROLL]:    'Department Payroll',
 };
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems = [
   { label: 'Attendance',  icon: 'calendar_month',  path: ROUTES.HOD_ATTENDANCE },
   { label: 'Leave',       icon: 'event_busy',      path: ROUTES.HOD_LEAVE },
   { label: 'Schedules',   icon: 'schedule',        path: ROUTES.HOD_SCHEDULE },
+  { label: 'Payroll',     icon: 'payments',        path: ROUTES.HOD_PAYROLL },
 ];
 
 const HODLayout = () => {

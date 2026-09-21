@@ -32,6 +32,7 @@ export const ROUTES = {
   HOD_ATTENDANCE: '/hod/attendance',
   HOD_LEAVE: '/hod/leave',
   HOD_SCHEDULE: '/hod/schedule',
+  HOD_PAYROLL:  '/hod/payroll',
   STAFF_DASHBOARD: '/staff/dashboard',
   STAFF_PROFILE: '/staff/profile',
   STAFF_ATTENDANCE: '/staff/attendance',
