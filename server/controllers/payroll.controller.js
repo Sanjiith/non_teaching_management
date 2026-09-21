@@ -4,6 +4,7 @@ const Attendance = require('../models/Attendance.model');
 const { computePayroll } = require('../services/payroll.service');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { normalizeRole } = require('../middleware/role.middleware');
+const notificationService = require('../services/notification.service');
 
 /**
  * Builds the date range for a given month/year (UTC).
@@ -349,6 +350,17 @@ const updatePayrollStatus = async (req, res) => {
     if (status === 'Paid') payroll.paidAt = new Date();
 
     await payroll.save();
+
+    if (status === 'Processed' || status === 'Paid') {
+      const monthName = new Date(Date.UTC(payroll.year, payroll.month - 1, 1))
+        .toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' });
+      await notificationService.createNotification({
+        user: payroll.user,
+        title: `Payroll ${status}`,
+        message: `Your payroll for ${monthName} ${payroll.year} has been ${status.toLowerCase()}.`,
+        type: 'success'
+      });
+    }
 
     return sendSuccess(res, 200, `Payroll status updated to ${status}`, { payroll });
   } catch (err) {

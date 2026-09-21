@@ -4,6 +4,8 @@ const User = require('../models/User.model');
 const Leave = require('../models/Leave.model');
 const Attendance = require('../models/Attendance.model');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
+const notificationService = require('../services/notification.service');
+
 
 const normalizeDate = (d) => {
   const date = new Date(d);
@@ -108,6 +110,14 @@ exports.assignSchedule = async (req, res) => {
         ? 'Shift assigned, but marked as "On Leave" due to approved leave conflict'
         : 'Shift assigned successfully',
     };
+
+    // Notify Staff
+    await notificationService.createNotification({
+      user: staffId,
+      title: 'New Shift Assigned',
+      message: `You have been assigned to ${schedule.shift?.name || 'a shift'} on ${scheduleDate.toLocaleDateString('en-IN')}.`,
+      type: 'info'
+    });
 
     return sendSuccess(res, 201, responsePayload.message, responsePayload);
   } catch (error) {
@@ -273,6 +283,14 @@ exports.updateSchedule = async (req, res) => {
       { path: 'shift', select: 'name startTime endTime workingHours' },
       { path: 'department', select: 'name code' },
     ]);
+
+    // Notify Staff
+    await notificationService.createNotification({
+      user: schedule.staff._id || schedule.staff,
+      title: 'Schedule Updated',
+      message: `Your schedule on ${new Date(schedule.date).toLocaleDateString('en-IN')} has been updated.`,
+      type: 'warning'
+    });
 
     return sendSuccess(res, 200, 'Schedule updated successfully', schedule);
   } catch (error) {

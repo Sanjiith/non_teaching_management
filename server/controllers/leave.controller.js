@@ -3,6 +3,7 @@ const Attendance = require('../models/Attendance.model');
 const User = require('../models/User.model');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { normalizeRole } = require('../middleware/role.middleware');
+const notificationService = require('../services/notification.service');
 
 /**
  * Normalizes Date string or Date object to midnight UTC
@@ -119,6 +120,17 @@ const applyLeave = async (req, res) => {
     const populatedLeave = await Leave.findById(leave._id)
       .populate('user', 'name employeeId staffId designation')
       .populate('department', 'name code');
+
+    // Notify HOD
+    if (user.department) {
+      const deptId = user.department._id || user.department;
+      await notificationService.notifyHOD({
+        departmentId: deptId,
+        title: 'New Leave Request',
+        message: `${user.name} applied for ${totalDays} day(s) of ${actualType}.`,
+        type: 'info'
+      });
+    }
 
     return sendSuccess(res, 201, 'Leave application submitted successfully', {
       leave: populatedLeave,
@@ -327,6 +339,14 @@ const approveLeave = async (req, res) => {
       .populate('user', 'name employeeId staffId designation')
       .populate('approvedBy', 'name employeeId');
 
+    // Notify Staff
+    await notificationService.createNotification({
+      user: leave.user,
+      title: 'Leave Approved',
+      message: `Your ${leave.type} request has been approved.`,
+      type: 'success'
+    });
+
     return sendSuccess(res, 200, 'Leave approved successfully and attendance updated', {
       leave: populatedLeave,
       attendanceUpdated: updatedAttendanceDates,
@@ -393,6 +413,14 @@ const rejectLeave = async (req, res) => {
       .populate('user', 'name employeeId staffId designation')
       .populate('approvedBy', 'name employeeId');
 
+    // Notify Staff
+    await notificationService.createNotification({
+      user: leave.user,
+      title: 'Leave Rejected',
+      message: `Your ${leave.type} request was rejected.`,
+      type: 'error'
+    });
+
     return sendSuccess(res, 200, 'Leave request rejected and reserved balance restored', {
       leave: populatedLeave,
       updatedBalances: user?.leaveBalances,
@@ -458,6 +486,17 @@ const cancelLeave = async (req, res) => {
     leave.status = 'Cancelled';
     leave.approvalRemarks = req.body.remarks || 'Cancelled by staff';
     await leave.save();
+
+    // Notify HOD if staff cancelled their leave
+    if (user && user.department) {
+      const deptId = user.department._id || user.department;
+      await notificationService.notifyHOD({
+        departmentId: deptId,
+        title: 'Leave Cancelled',
+        message: `${user.name} cancelled their ${leave.type}.`,
+        type: 'warning'
+      });
+    }
 
     return sendSuccess(res, 200, 'Leave request cancelled successfully', {
       leave,

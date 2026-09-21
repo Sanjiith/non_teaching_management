@@ -3,6 +3,9 @@ import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getDepartmentAttendance } from '../../services/attendance.service';
 import { getDepartmentLeaves, approveLeave, rejectLeave } from '../../services/leave.service';
+import { getDepartmentSchedules } from '../../services/schedule.service';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '../../config/constants';
 
 const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) => (
   <div className="kpi-card">
@@ -19,21 +22,27 @@ const HODDashboard = () => {
   const { user } = useAuth();
   const dept = user?.department?.name || 'Department';
 
+  const navigate = useNavigate();
+
   const [staffAttendance, setStaffAttendance] = useState([]);
   const [pendingLeaves, setPendingLeaves] = useState([]);
+  const [deptSchedules, setDeptSchedules] = useState([]);
   const [deptStaffCount, setDeptStaffCount] = useState(0);
   const [processingId, setProcessingId] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
 
   const loadData = useCallback(async () => {
     try {
-      const [attData, leavesData] = await Promise.all([
+      const today = new Date().toISOString().split('T')[0];
+      const [attData, leavesData, schedData] = await Promise.all([
         getDepartmentAttendance(),
         getDepartmentLeaves({ status: 'Pending' }),
+        getDepartmentSchedules({ startDate: today, endDate: today }),
       ]);
       setStaffAttendance(attData.records || []);
       setDeptStaffCount(attData.departmentStaffCount || (attData.records || []).length);
       setPendingLeaves(leavesData.leaves || []);
+      setDeptSchedules(schedData || []);
     } catch (err) {
       console.error('Failed to load HOD data:', err);
     }
@@ -202,6 +211,49 @@ const HODDashboard = () => {
                 })}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Department Schedules (Today) */}
+        <div className="lg:col-span-3">
+          <div className="bit-card h-full">
+            <div className="flex items-center justify-between mb-md">
+              <h3 className="font-title-md text-title-md text-on-surface">Today's Department Schedules</h3>
+              <button
+                onClick={() => navigate(ROUTES.HOD_SCHEDULE)}
+                className="btn-ghost text-xs"
+              >
+                View full roster
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              {deptSchedules.length === 0 ? (
+                <p className="text-secondary text-center py-xl font-body-sm">
+                  No schedules assigned for today.
+                </p>
+              ) : (
+                <table className="bit-table">
+                  <thead>
+                    <tr>
+                      <th>Staff Member</th>
+                      <th>Shift</th>
+                      <th>Timing</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deptSchedules.map((s) => (
+                      <tr key={s._id}>
+                        <td className="font-medium">{s.staff?.name}</td>
+                        <td className="text-secondary">{s.shift?.name || 'Custom'}</td>
+                        <td className="text-secondary text-xs">{s.startTime} - {s.endTime}</td>
+                        <td><StatusBadge status={s.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       </div>

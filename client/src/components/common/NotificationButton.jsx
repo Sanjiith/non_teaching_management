@@ -1,20 +1,52 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import notificationService from '../../services/notification.service';
+import { formatDistanceToNow } from 'date-fns';
 
-/**
- * NotificationButton — bell icon with badge and dropdown panel
- * Full notification logic will be implemented in a later day.
- */
 const NotificationButton = () => {
   const [open, setOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // Placeholder notifications for UI structure
-  const mockNotifications = [
-    { id: 1, title: 'Leave Request', message: 'Your leave request has been submitted.', time: '2 min ago', type: 'info', isRead: false },
-    { id: 2, title: 'Attendance Alert', message: 'Attendance marked for today.', time: '1 hr ago', type: 'success', isRead: true },
-    { id: 3, title: 'Payroll', message: 'August payroll has been processed.', time: 'Yesterday', type: 'success', isRead: true },
-  ];
+  const fetchNotifications = async () => {
+    try {
+      const res = await notificationService.getMyNotifications(1, 10);
+      if (res.success) {
+        setNotifications(res.data.notifications);
+        setUnreadCount(res.data.unreadCount);
+      }
+    } catch (error) {
+      console.error('Error fetching notifications', error);
+    }
+  };
 
-  const unreadCount = mockNotifications.filter((n) => !n.isRead).length;
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000); // Poll every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleMarkAsRead = async (id, currentReadStatus) => {
+    if (currentReadStatus) return;
+    try {
+      await notificationService.markAsRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n._id === id ? { ...n, isRead: true } : n))
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Error marking as read', error);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationService.markAllAsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Error marking all as read', error);
+    }
+  };
 
   const typeIcon = { info: 'info', success: 'check_circle', warning: 'warning', error: 'error' };
   const typeColor = { info: 'text-blue-600', success: 'text-emerald-600', warning: 'text-amber-600', error: 'text-red-600' };
@@ -22,7 +54,10 @@ const NotificationButton = () => {
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          setOpen((prev) => !prev);
+          if (!open) fetchNotifications();
+        }}
         className="p-xs hover:bg-surface-container-low rounded-full transition-colors relative cursor-pointer active:opacity-80"
         title="Notifications"
         aria-label="Notifications"
@@ -35,47 +70,55 @@ const NotificationButton = () => {
 
       {open && (
         <>
-          {/* Backdrop */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-
-          {/* Dropdown panel */}
           <div className="absolute right-0 top-full mt-sm w-80 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-md z-50 overflow-hidden">
-            {/* Header */}
             <div className="flex items-center justify-between px-md py-sm border-b border-outline-variant">
               <h3 className="font-title-md text-title-md text-on-surface">Notifications</h3>
               {unreadCount > 0 && (
-                <span className="badge-info">{unreadCount} new</span>
+                <button
+                  onClick={handleMarkAllRead}
+                  className="text-xs text-primary hover:underline font-medium"
+                >
+                  Mark all read
+                </button>
               )}
             </div>
 
-            {/* Items */}
-            <ul className="max-h-64 overflow-y-auto divide-y divide-outline-variant">
-              {mockNotifications.map((n) => (
-                <li
-                  key={n.id}
-                  className={`flex items-start gap-sm px-md py-sm hover:bg-surface-container-low transition-colors cursor-pointer ${!n.isRead ? 'bg-surface-container' : ''}`}
-                >
-                  <span className={`material-symbols-outlined text-xl mt-xs ${typeColor[n.type]}`}>
-                    {typeIcon[n.type]}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-label-md text-label-md text-on-surface">{n.title}</p>
-                    <p className="font-body-sm text-body-sm text-secondary truncate">{n.message}</p>
-                    <p className="font-label-sm text-label-sm text-outline mt-xs">{n.time}</p>
-                  </div>
-                  {!n.isRead && (
-                    <div className="w-2 h-2 bg-primary rounded-full mt-sm flex-shrink-0" />
-                  )}
+            <ul className="max-h-80 overflow-y-auto divide-y divide-outline-variant">
+              {notifications.length === 0 ? (
+                <li className="px-md py-lg text-center text-secondary font-body-sm">
+                  No notifications yet.
                 </li>
-              ))}
+              ) : (
+                notifications.map((n) => (
+                  <li
+                    key={n._id}
+                    onClick={() => handleMarkAsRead(n._id, n.isRead)}
+                    className={`flex items-start gap-sm px-md py-sm hover:bg-surface-container-low transition-colors cursor-pointer ${
+                      !n.isRead ? 'bg-surface-container' : ''
+                    }`}
+                  >
+                    <span className={`material-symbols-outlined text-xl mt-xs ${typeColor[n.type] || typeColor.info}`}>
+                      {typeIcon[n.type] || typeIcon.info}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-label-md text-label-md ${!n.isRead ? 'text-on-surface font-semibold' : 'text-on-surface'}`}>
+                        {n.title}
+                      </p>
+                      <p className="font-body-sm text-body-sm text-secondary line-clamp-2">
+                        {n.message}
+                      </p>
+                      <p className="font-label-sm text-label-sm text-outline mt-xs">
+                        {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
+                      </p>
+                    </div>
+                    {!n.isRead && (
+                      <div className="w-2 h-2 bg-primary rounded-full mt-sm flex-shrink-0" />
+                    )}
+                  </li>
+                ))
+              )}
             </ul>
-
-            {/* Footer */}
-            <div className="px-md py-sm border-t border-outline-variant">
-              <button className="btn-ghost w-full justify-center text-center">
-                View all notifications
-              </button>
-            </div>
           </div>
         </>
       )}

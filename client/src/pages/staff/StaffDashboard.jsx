@@ -7,6 +7,7 @@ import { ROUTES } from '../../config/constants';
 import { getMyAttendance } from '../../services/attendance.service';
 import { getMyLeaves, applyLeave } from '../../services/leave.service';
 import { getMySchedules } from '../../services/schedule.service';
+import { getMyPayroll } from '../../services/payroll.service';
 
 const InfoRow = ({ label, value }) => (
   <div className="flex flex-col sm:flex-row sm:items-center py-sm border-b border-outline-variant last:border-0">
@@ -29,6 +30,7 @@ const StaffDashboard = () => {
   const [leavesList, setLeavesList] = useState([]);
   const [balances, setBalances] = useState(null);
   const [todayShift, setTodayShift] = useState(null);
+  const [latestPayroll, setLatestPayroll] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Apply Leave Modal state
@@ -48,10 +50,11 @@ const StaffDashboard = () => {
   const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      const [attData, leavesData, schedData] = await Promise.all([
+      const [attData, leavesData, schedData, payrollData] = await Promise.all([
         getMyAttendance({ limit: 7 }),
         getMyLeaves({ limit: 5 }),
         getMySchedules(),
+        getMyPayroll({ limit: 1 }),
       ]);
 
       setAttendanceRecords(attData.records || []);
@@ -68,6 +71,10 @@ const StaffDashboard = () => {
         (s) => new Date(s.date).toISOString().split('T')[0] === todayStr
       );
       setTodayShift(foundToday || null);
+
+      if (payrollData && payrollData.payrolls && payrollData.payrolls.length > 0) {
+        setLatestPayroll(payrollData.payrolls[0]);
+      }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -240,6 +247,32 @@ const StaffDashboard = () => {
             >
               <span className="material-symbols-outlined text-sm">calendar_month</span>
               My Roster
+            </button>
+          </div>
+
+          {/* Latest Payroll Card */}
+          <div className="bit-card p-md border-l-4 border-l-emerald-500 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-md">
+            <div className="space-y-xs">
+              <div className="flex items-center gap-xs">
+                <span className="material-symbols-outlined text-emerald-600 text-xl">payments</span>
+                <span className="font-label-md text-label-md text-secondary uppercase font-semibold">Latest Payroll</span>
+                {latestPayroll && <StatusBadge status={latestPayroll.status} />}
+              </div>
+              <p className="font-title-md text-title-md text-on-surface font-bold">
+                {latestPayroll ? `₹${latestPayroll.netSalary.toLocaleString('en-IN')}` : 'No Payroll Data'}
+              </p>
+              <p className="font-body-sm text-body-sm text-outline">
+                {latestPayroll
+                  ? `For ${new Date(Date.UTC(latestPayroll.year, latestPayroll.month - 1, 1)).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`
+                  : 'Payroll has not been generated for you yet.'}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(ROUTES.STAFF_PAYROLL)}
+              className="btn-secondary text-xs flex items-center gap-xs whitespace-nowrap self-stretch sm:self-auto justify-center"
+            >
+              <span className="material-symbols-outlined text-sm">receipt_long</span>
+              View Details
             </button>
           </div>
 

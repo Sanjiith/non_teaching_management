@@ -22,6 +22,7 @@ const leaveRoutes = require('./routes/leave.routes');
 const shiftRoutes = require('./routes/shift.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const payrollRoutes  = require('./routes/payroll.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.use('/api/leaves', leaveRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/payroll',  payrollRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404 handler
 app.use((req, res) => {

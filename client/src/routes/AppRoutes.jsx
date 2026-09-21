@@ -112,8 +112,6 @@ const AppRoutes = () => {
       >
         <Route index element={<Navigate to={ROUTES.STAFF_DASHBOARD} replace />} />
         <Route path="dashboard"  element={<StaffDashboard />} />
-        <Route path="profile"    element={<ComingSoon title="My Profile" />} />
-        <Route path="attendance" element={<StaffAttendancePage />} />
         <Route path="leave"      element={<StaffLeavePage />} />
         <Route path="schedule"   element={<StaffSchedulePage />} />
         <Route path="payroll"    element={<StaffPayrollPage />} />

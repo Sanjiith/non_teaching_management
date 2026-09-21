@@ -5,6 +5,9 @@ import StatusBadge from '../../components/common/StatusBadge';
 import { ROUTES } from '../../config/constants';
 import { getAttendanceStats } from '../../services/attendance.service';
 import { getAllLeaves, approveLeave, rejectLeave } from '../../services/leave.service';
+import notificationService from '../../services/notification.service';
+import { getAllSchedules } from '../../services/schedule.service';
+import { getPayrollStats } from '../../services/payroll.service';
 
 const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) => (
   <div className="kpi-card">
@@ -47,16 +50,38 @@ const AdminDashboard = () => {
     attendanceRateToday: 0,
   });
   const [recentLeaves, setRecentLeaves] = useState([]);
+  const [systemActivity, setSystemActivity] = useState([]);
+  const [activeShiftsCount, setActiveShiftsCount] = useState(0);
+  const [payrollStatus, setPayrollStatus] = useState('Pending');
   const [processingId, setProcessingId] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
-      const [statsData, leavesData] = await Promise.all([
+      const today = new Date();
+      const month = today.getMonth() + 1;
+      const year = today.getFullYear();
+      const todayStr = today.toISOString().split('T')[0];
+
+      const [statsData, leavesData, notifsRes, schedulesData, payrollData] = await Promise.all([
         getAttendanceStats(),
         getAllLeaves({ limit: 5 }),
+        notificationService.getMyNotifications(1, 5),
+        getAllSchedules({ startDate: todayStr, endDate: todayStr }),
+        getPayrollStats({ month, year }),
       ]);
       if (statsData) setStats(statsData);
       if (leavesData.leaves) setRecentLeaves(leavesData.leaves);
+      if (notifsRes.success) setSystemActivity(notifsRes.data.notifications);
+      if (schedulesData) setActiveShiftsCount(schedulesData.length);
+      if (payrollData) {
+        const total = payrollData.totalCount || 0;
+        const processed = payrollData.processedCount || 0;
+        const paid = payrollData.paidCount || 0;
+        if (paid === total && total > 0) setPayrollStatus('Paid');
+        else if (processed === total && total > 0) setPayrollStatus('Processed');
+        else if (processed > 0 || paid > 0) setPayrollStatus('In Progress');
+        else setPayrollStatus('Pending');
+      }
     } catch (err) {
       console.error('Failed to load admin dashboard data:', err);
     }
@@ -119,12 +144,12 @@ const AdminDashboard = () => {
       </div>
 
       {/* ── KPI Grid ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-md">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-md">
         <KPICard
           label="Total Staff"
           value={stats.totalStaff || 89}
           icon="groups"
-          sub="Across all departments"
+          sub="All departments"
         />
         <KPICard
           label="Present Today"
@@ -132,13 +157,6 @@ const AdminDashboard = () => {
           icon="how_to_reg"
           sub={`${stats.attendanceRateToday || 0}% rate`}
           valueColor="text-primary-container"
-        />
-        <KPICard
-          label="Absent"
-          value={stats.absentToday || 0}
-          icon="person_off"
-          sub="Requires attention"
-          valueColor="text-error"
         />
         <KPICard
           label="On Leave"
@@ -153,6 +171,20 @@ const AdminDashboard = () => {
           icon="pending_actions"
           sub="Awaiting review"
           valueColor="text-amber-600"
+        />
+        <KPICard
+          label="Active Shifts"
+          value={activeShiftsCount}
+          icon="schedule"
+          sub="Scheduled today"
+          valueColor="text-blue-600"
+        />
+        <KPICard
+          label="Payroll Status"
+          value={payrollStatus}
+          icon="payments"
+          sub="Current month"
+          valueColor={payrollStatus === 'Paid' ? 'text-emerald-600' : 'text-amber-600'}
         />
       </div>
 
@@ -231,24 +263,36 @@ const AdminDashboard = () => {
           </SectionCard>
         </div>
 
-        {/* Quick Actions */}
-        <SectionCard title="Quick Actions">
+        {/* Recent System Activity */}
+        <SectionCard title="Recent System Activity">
           <div className="flex flex-col gap-sm">
-            {[
-              { label: 'Attendance Management', icon: 'how_to_reg', path: ROUTES.ADMIN_ATTENDANCE, cls: 'btn-primary' },
-              { label: 'Leave Approvals',       icon: 'event_busy',  path: ROUTES.ADMIN_LEAVE,      cls: 'btn-secondary' },
-              { label: 'Staff Directory',        icon: 'group',       path: ROUTES.ADMIN_STAFF,      cls: 'btn-secondary' },
-              { label: 'Departments',            icon: 'account_balance', path: ROUTES.ADMIN_DEPARTMENTS, cls: 'btn-ghost' },
-            ].map(({ label, icon, path, cls }) => (
-              <button
-                key={label}
-                onClick={() => navigate(path)}
-                className={`${cls} w-full justify-start`}
-              >
-                <span className="material-symbols-outlined text-xl">{icon}</span>
-                {label}
-              </button>
-            ))}
+            {systemActivity.length === 0 ? (
+              <p className="text-secondary text-sm p-sm">No recent activity.</p>
+            ) : (
+              systemActivity.map((activity) => {
+                const isErr = activity.type === 'error';
+                const isWarn = activity.type === 'warning';
+                const isSucc = activity.type === 'success';
+                let colorClass = 'text-blue-600 bg-blue-50';
+                if (isErr) colorClass = 'text-red-600 bg-red-50';
+                if (isWarn) colorClass = 'text-amber-600 bg-amber-50';
+                if (isSucc) colorClass = 'text-emerald-600 bg-emerald-50';
+
+                return (
+                  <div key={activity._id} className="flex gap-sm p-sm border border-outline-variant rounded-lg items-start">
+                    <div className={`p-xs rounded-full ${colorClass} mt-xs`}>
+                      <span className="material-symbols-outlined text-[16px] block">
+                        {isErr ? 'error' : isWarn ? 'warning' : isSucc ? 'check_circle' : 'info'}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="font-label-md text-label-md text-on-surface">{activity.title}</p>
+                      <p className="font-body-sm text-body-sm text-secondary">{activity.message}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </SectionCard>
       </div>

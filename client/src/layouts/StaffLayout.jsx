@@ -15,9 +15,7 @@ const pageTitles = {
 };
 
 const navItems = [
-  { label: 'Dashboard',    icon: 'dashboard',      path: ROUTES.STAFF_DASHBOARD },
-  { label: 'My Profile',   icon: 'person',          path: ROUTES.STAFF_PROFILE },
-  { label: 'My Attendance',icon: 'calendar_month',  path: ROUTES.STAFF_ATTENDANCE },
+  { label: 'My Portal',    icon: 'dashboard',       path: ROUTES.STAFF_DASHBOARD },
   { label: 'My Leave',     icon: 'event_busy',      path: ROUTES.STAFF_LEAVE },
   { label: 'My Schedule',  icon: 'schedule',        path: ROUTES.STAFF_SCHEDULE },
   { label: 'My Payroll',   icon: 'payments',        path: ROUTES.STAFF_PAYROLL },
