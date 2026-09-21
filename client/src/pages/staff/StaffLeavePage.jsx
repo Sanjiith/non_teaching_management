@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getMyLeaves, applyLeave, cancelLeave } from '../../services/leave.service';
+import { exportCSV, getLeaveBalanceWarning } from '../../utils/exportCSV';
 
 const StaffLeavePage = () => {
   const [leaves, setLeaves] = useState([]);
@@ -110,16 +111,31 @@ const StaffLeavePage = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
         {balanceItems.map((b) => {
           const available = Math.max(0, b.total - b.used - b.reserved);
+          const warningLevel = getLeaveBalanceWarning(available, b.total);
           return (
-            <div key={b.type} className="kpi-card">
+            <div key={b.type} className={`kpi-card relative ${warningLevel === 'critical' ? 'border-red-300 bg-red-50/20' : warningLevel === 'warning' ? 'border-amber-300 bg-amber-50/20' : ''}`}>
               <div className="flex justify-between items-start mb-sm">
                 <span className="kpi-label">{b.type}</span>
-                <span className="material-symbols-outlined text-outline text-xl">event_available</span>
+                {warningLevel === 'critical' && (
+                  <span className="material-symbols-outlined text-red-500 text-xl" title="Critical: leave balance very low">warning</span>
+                )}
+                {warningLevel === 'warning' && (
+                  <span className="material-symbols-outlined text-amber-500 text-xl" title="Warning: leave balance is low">info</span>
+                )}
+                {!warningLevel && (
+                  <span className="material-symbols-outlined text-outline text-xl">event_available</span>
+                )}
               </div>
               <div className="kpi-value text-primary-container">{available} <span className="text-sm font-normal text-secondary">/ {b.total} days</span></div>
               <div className="kpi-sub">
                 {b.used} used {b.reserved > 0 ? `· ${b.reserved} pending` : ''}
               </div>
+              {warningLevel === 'critical' && (
+                <p className="text-xs text-red-600 font-medium mt-xs">⚠ Balance critically low</p>
+              )}
+              {warningLevel === 'warning' && (
+                <p className="text-xs text-amber-600 font-medium mt-xs">Leave balance is low</p>
+              )}
             </div>
           );
         })}

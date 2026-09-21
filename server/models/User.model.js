@@ -70,6 +70,9 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: [0, 'Basic salary cannot be negative'],
+      // NOTE: max is NOT enforced here for HODs/Admin who may exceed ₹40,000.
+      // The payroll engine applies the ₹40,000 cap during payroll calculation.
+      // Validator enforces this cap for Staff role only via user.validator.js.
     },
     leaveBalances: {
       casualLeave: {

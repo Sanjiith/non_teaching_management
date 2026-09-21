@@ -2,12 +2,18 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getDepartmentAttendance, markOrCorrectAttendance } from '../../services/attendance.service';
+import { getHODAttendanceReport } from '../../services/report.service';
+import { exportCSV, getAttendanceRateColor } from '../../utils/exportCSV';
 
 const HODAttendancePage = () => {
   const { user } = useAuth();
+  const now = new Date();
   const [records, setRecords] = useState([]);
+  const [reportStats, setReportStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [correctingRecord, setCorrectingRecord] = useState(null);
   const [newStatus, setNewStatus] = useState('Present');
   const [remarks, setRemarks] = useState('');
@@ -16,16 +22,18 @@ const HODAttendancePage = () => {
   const fetchAttendance = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getDepartmentAttendance({
-        status: statusFilter || undefined,
-      });
-      setRecords(data.records || []);
+      const [listData, reportData] = await Promise.all([
+        getDepartmentAttendance({ status: statusFilter || undefined }),
+        getHODAttendanceReport({ month: selectedMonth || undefined, year: selectedYear }),
+      ]);
+      setRecords(listData.records || []);
+      if (reportData) setReportStats(reportData.stats);
     } catch (err) {
       console.error('Error fetching department attendance:', err);
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, selectedMonth, selectedYear]);
 
   useEffect(() => {
     fetchAttendance();
@@ -62,14 +70,17 @@ const HODAttendancePage = () => {
             Monitor and adjust daily attendance for staff in {user?.department?.name || 'your department'}
           </p>
         </div>
-
-        {/* Status Filter */}
-        <div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bit-input py-xs text-body-sm w-44"
-          >
+        <div className="flex flex-wrap gap-sm items-center">
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value ? Number(e.target.value) : '')} className="bit-input py-xs text-body-sm w-36">
+            <option value="">All Months</option>
+            {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m,i) => (
+              <option key={i+1} value={i+1}>{m}</option>
+            ))}
+          </select>
+          <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bit-input py-xs text-body-sm w-28">
+            {[2024,2025,2026,2027].map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bit-input py-xs text-body-sm w-36">
             <option value="">All Statuses</option>
             <option value="Present">Present</option>
             <option value="Leave">Leave</option>
@@ -77,8 +88,42 @@ const HODAttendancePage = () => {
             <option value="Weekly Off">Weekly Off</option>
             <option value="Holiday">Holiday</option>
           </select>
+          <button
+            onClick={() => {
+              const cols = [
+                { key: 'employee', label: 'Employee', getValue: (r) => r.user?.name || '—' },
+                { key: 'employeeId', label: 'Employee ID', getValue: (r) => r.user?.employeeId || '—' },
+                { key: 'date', label: 'Date', getValue: (r) => new Date(r.date).toLocaleDateString('en-IN') },
+                { key: 'status', label: 'Status', getValue: (r) => r.status },
+                { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarks || '' },
+              ];
+              exportCSV(records, `Dept_Attendance_${selectedYear}`, cols);
+            }}
+            className="btn-secondary"
+          >
+            <span className="material-symbols-outlined text-sm">download</span> Export
+          </button>
         </div>
       </div>
+
+      {/* Dept Summary Stats */}
+      {reportStats && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-md">
+          {[
+            { label: 'Present', value: reportStats.Present || 0, color: 'text-emerald-600' },
+            { label: 'Absent', value: reportStats.Absent || 0, color: 'text-red-600' },
+            { label: 'On Leave', value: (reportStats.Leave || 0) + (reportStats['On-Leave'] || 0), color: 'text-amber-600' },
+            { label: 'Holiday', value: reportStats.Holiday || 0, color: 'text-blue-600' },
+            { label: 'Weekly Off', value: reportStats['Weekly Off'] || 0, color: 'text-secondary' },
+            { label: 'Attendance %', value: `${reportStats.attendanceRate}%`, color: getAttendanceRateColor(reportStats.attendanceRate) },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="kpi-card">
+              <div className="kpi-label">{label}</div>
+              <div className={`kpi-value ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="bit-card">
         <h3 className="font-title-md text-title-md text-on-surface mb-md">Staff Attendance Records</h3>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getMyAttendance } from '../../services/attendance.service';
+import { exportCSV, getAttendanceRateColor } from '../../utils/exportCSV';
 
 const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) => (
   <div className="kpi-card">
@@ -22,6 +23,8 @@ const StaffAttendancePage = () => {
     presentDays: 0,
     absentDays: 0,
     leaveDays: 0,
+    holidayDays: 0,
+    weeklyOffDays: 0,
     attendanceRate: 100,
     totalRecords: 0,
   });
@@ -64,6 +67,7 @@ const StaffAttendancePage = () => {
 
   return (
     <div className="space-y-lg">
+      {/* Header with Export */}
       <div className="page-header flex flex-col sm:flex-row sm:items-center justify-between gap-md">
         <div>
           <h2 className="font-headline-md text-headline-md text-on-surface">My Attendance</h2>
@@ -71,60 +75,73 @@ const StaffAttendancePage = () => {
             Review your daily attendance records and verified leaves
           </p>
         </div>
-
-        {/* Filter controls */}
         <div className="flex items-center gap-sm">
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(Number(e.target.value))}
             className="bit-input py-xs text-body-sm w-36"
           >
-            {months.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
+            {months.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
           </select>
           <select
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
             className="bit-input py-xs text-body-sm w-28"
           >
-            {[2025, 2026, 2027].map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
+            {[2025, 2026, 2027].map((y) => (<option key={y} value={y}>{y}</option>))}
           </select>
+          <button
+            onClick={() => {
+              const cols = [
+                { key: 'date', label: 'Date', getValue: (r) => new Date(r.date).toLocaleDateString('en-IN') },
+                { key: 'day', label: 'Day', getValue: (r) => new Date(r.date).toLocaleDateString('en-IN', { weekday: 'long' }) },
+                { key: 'status', label: 'Status', getValue: (r) => r.status },
+                { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarks || '' },
+              ];
+              exportCSV(records, `My_Attendance_${months[selectedMonth-1]?.label}_${selectedYear}`, cols);
+            }}
+            className="btn-secondary"
+          >
+            <span className="material-symbols-outlined text-sm">download</span>
+            Export
+          </button>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
-        <KPICard
-          label="Present Days"
-          value={stats.presentDays}
-          icon="how_to_reg"
-          sub="Recorded present"
-          valueColor="text-primary-container"
-        />
-        <KPICard
-          label="Leave Days"
-          value={stats.leaveDays}
-          icon="flight_takeoff"
-          sub="Approved leaves"
-          valueColor="text-amber-600"
-        />
-        <KPICard
-          label="Absent"
-          value={stats.absentDays}
-          icon="person_off"
-          sub="Recorded absent"
-          valueColor="text-error"
-        />
-        <KPICard
-          label="Attendance Rate"
-          value={`${stats.attendanceRate}%`}
-          icon="percent"
-          sub="Dynamic attendance rate"
-          valueColor="text-emerald-700"
-        />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-md">
+        <div className="kpi-card">
+          <div className="kpi-label">Present Days</div>
+          <div className="kpi-value text-primary-container">{stats.presentDays}</div>
+          <div className="kpi-sub">Recorded present</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Leave Days</div>
+          <div className="kpi-value text-amber-600">{stats.leaveDays}</div>
+          <div className="kpi-sub">Approved leaves</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Absent</div>
+          <div className="kpi-value text-red-600">{stats.absentDays}</div>
+          <div className="kpi-sub">Recorded absent</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Holidays</div>
+          <div className="kpi-value text-blue-600">{stats.holidayDays || 0}</div>
+          <div className="kpi-sub">Public holidays</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Weekly Off</div>
+          <div className="kpi-value text-secondary">{stats.weeklyOffDays || 0}</div>
+          <div className="kpi-sub">Non-working days</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Attendance Rate</div>
+          <div className={`kpi-value ${getAttendanceRateColor(stats.attendanceRate)}`}>{stats.attendanceRate}%</div>
+          <div className="kpi-sub">
+            {stats.attendanceRate >= 90 ? '✓ Excellent' : stats.attendanceRate >= 75 ? '⚠ Fair' : '⚠ Low'}
+          </div>
+        </div>
       </div>
 
       {/* Attendance Table */}

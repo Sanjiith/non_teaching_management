@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getMyPayroll } from '../../services/payroll.service';
+import { exportCSV } from '../../utils/exportCSV';
 
 const MONTHS = [
   { value: 1, label: 'January' },   { value: 2, label: 'February' },
@@ -80,7 +81,7 @@ const StaffPayrollPage = () => {
             View your monthly salary breakdown and payslip history
           </p>
         </div>
-        <div className="flex gap-sm">
+        <div className="flex gap-sm flex-wrap">
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(Number(e.target.value))}
@@ -95,6 +96,22 @@ const StaffPayrollPage = () => {
           >
             {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
+          <button
+            onClick={() => {
+              const cols = [
+                { key: 'period', label: 'Period', getValue: (p) => `${monthName(p.month)} ${p.year}` },
+                { key: 'grossSalary', label: 'Gross Salary (₹)', getValue: (p) => p.grossSalary?.toFixed(2) },
+                { key: 'netSalary', label: 'Net Salary (₹)', getValue: (p) => p.netSalary?.toFixed(2) },
+                { key: 'presentDays', label: 'Present Days', getValue: (p) => p.presentDays },
+                { key: 'status', label: 'Status', getValue: (p) => p.status },
+              ];
+              exportCSV(payrolls, `My_Payroll_${selectedYear}`, cols);
+            }}
+            className="btn-secondary"
+          >
+            <span className="material-symbols-outlined text-sm">download</span>
+            Export
+          </button>
         </div>
       </div>
 

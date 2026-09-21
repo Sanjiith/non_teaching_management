@@ -10,13 +10,21 @@ const applyLeaveValidation = [
     }
     return true;
   }),
+
   body().custom((value, { req }) => {
     const start = req.body.startDate || req.body.fromDate;
     if (!start || isNaN(Date.parse(start))) {
       throw new Error('Valid start date is required');
     }
+    const startDate = new Date(start);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (startDate < today) {
+      throw new Error('Start date cannot be in the past');
+    }
     return true;
   }),
+
   body().custom((value, { req }) => {
     const end = req.body.endDate || req.body.toDate;
     if (!end || isNaN(Date.parse(end))) {
@@ -24,10 +32,22 @@ const applyLeaveValidation = [
     }
     return true;
   }),
+
+  body().custom((value, { req }) => {
+    const start = req.body.startDate || req.body.fromDate;
+    const end = req.body.endDate || req.body.toDate;
+    if (start && end && Date.parse(end) < Date.parse(start)) {
+      throw new Error('End date cannot be before start date');
+    }
+    return true;
+  }),
+
   body('reason')
     .notEmpty()
     .withMessage('Reason for leave is required')
-    .trim(),
+    .trim()
+    .isLength({ min: 5 })
+    .withMessage('Reason must be at least 5 characters'),
 ];
 
 const handleValidationErrors = (req, res, next) => {

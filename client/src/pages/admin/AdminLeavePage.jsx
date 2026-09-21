@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getAllLeaves, approveLeave, rejectLeave } from '../../services/leave.service';
+import { getAdminLeaveReport } from '../../services/report.service';
+import { exportCSV } from '../../utils/exportCSV';
 
 const AdminLeavePage = () => {
   const [leaves, setLeaves] = useState([]);
+  const [leaveStats, setLeaveStats] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
@@ -11,10 +14,12 @@ const AdminLeavePage = () => {
   const fetchLeaves = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getAllLeaves({
-        status: statusFilter || undefined,
-      });
-      setLeaves(data.leaves || []);
+      const [listData, reportData] = await Promise.all([
+        getAllLeaves({ status: statusFilter || undefined }),
+        getAdminLeaveReport({ status: statusFilter || undefined }),
+      ]);
+      setLeaves(listData.leaves || []);
+      if (reportData) setLeaveStats(reportData.stats);
     } catch (err) {
       console.error('Error fetching admin leaves:', err);
     } finally {
@@ -62,21 +67,51 @@ const AdminLeavePage = () => {
             Review, track, and manage all staff leave requests across institutions
           </p>
         </div>
-
-        <div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bit-input py-xs text-body-sm w-44"
-          >
+        <div className="flex flex-wrap gap-sm items-center">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bit-input py-xs text-body-sm w-44">
             <option value="">All Applications</option>
             <option value="Pending">Pending Only</option>
             <option value="Approved">Approved</option>
             <option value="Rejected">Rejected</option>
             <option value="Cancelled">Cancelled</option>
           </select>
+          <button
+            onClick={() => {
+              const cols = [
+                { key: 'employee', label: 'Employee', getValue: (l) => l.user?.name || '—' },
+                { key: 'employeeId', label: 'Employee ID', getValue: (l) => l.user?.employeeId || '—' },
+                { key: 'dept', label: 'Department', getValue: (l) => l.department?.code || '—' },
+                { key: 'type', label: 'Leave Type', getValue: (l) => l.type },
+                { key: 'from', label: 'From', getValue: (l) => new Date(l.fromDate).toLocaleDateString('en-IN') },
+                { key: 'to', label: 'To', getValue: (l) => new Date(l.toDate).toLocaleDateString('en-IN') },
+                { key: 'days', label: 'Days', getValue: (l) => l.totalDays },
+                { key: 'status', label: 'Status', getValue: (l) => l.status },
+              ];
+              exportCSV(leaves, 'Leave_Report', cols);
+            }}
+            className="btn-secondary"
+          >
+            <span className="material-symbols-outlined text-sm">download</span> Export CSV
+          </button>
         </div>
       </div>
+
+      {/* Leave Summary Stats */}
+      {leaveStats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+          {[
+            { label: 'Total Applications', value: leaveStats.totalApplications, color: 'text-on-surface' },
+            { label: 'Pending', value: leaveStats.statusCounts?.Pending || 0, color: 'text-amber-600' },
+            { label: 'Approved', value: leaveStats.statusCounts?.Approved || 0, color: 'text-emerald-600' },
+            { label: 'Rejected', value: leaveStats.statusCounts?.Rejected || 0, color: 'text-red-600' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="kpi-card">
+              <div className="kpi-label">{label}</div>
+              <div className={`kpi-value ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="bit-card">
         <h3 className="font-title-md text-title-md text-on-surface mb-md">All Staff Leave Applications</h3>

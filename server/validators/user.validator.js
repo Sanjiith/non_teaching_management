@@ -10,6 +10,11 @@ const createUserValidation = [
     if (!id || !id.toString().trim()) {
       throw new Error('Employee ID or Staff ID is required');
     }
+    // Staff ID format: BIT-XXX-NNN
+    const idStr = id.toString().trim().toUpperCase();
+    if (!/^BIT-[A-Z]+-\d{3,}$/.test(idStr)) {
+      throw new Error('Staff ID must follow the format BIT-ROLE-NNN (e.g. BIT-NTS-001)');
+    }
     return true;
   }),
   body('name')
@@ -31,8 +36,8 @@ const createUserValidation = [
     .withMessage(`Role must be one of: ${allowedRoles.join(', ')}`),
   body('basicSalary')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Basic salary must be a non-negative number'),
+    .isFloat({ min: 0, max: 40000 })
+    .withMessage('Basic salary must be between ₹0 and ₹40,000'),
   body('phone')
     .optional()
     .trim(),
@@ -61,8 +66,8 @@ const updateUserValidation = [
     .withMessage(`Role must be one of: ${allowedRoles.join(', ')}`),
   body('basicSalary')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Basic salary must be a non-negative number'),
+    .isFloat({ min: 0, max: 40000 })
+    .withMessage('Basic salary must be between ₹0 and ₹40,000'),
   body('phone')
     .optional()
     .trim(),
