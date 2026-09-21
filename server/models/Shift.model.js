@@ -16,6 +16,12 @@ const shiftSchema = new mongoose.Schema(
       type: String, // HH:MM format, e.g. "17:00"
       required: true,
     },
+    workingHours: {
+      type: Number,
+      default: 8,
+      min: 0,
+      max: 24,
+    },
     department: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Department',

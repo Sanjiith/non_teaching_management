@@ -9,15 +9,11 @@ const startServer = async () => {
   await connectDB();
 
   app.listen(PORT, () => {
+    console.log('BIT Non-Teaching Staff Portal — Backend');
     console.log('');
-    console.log('╔══════════════════════════════════════════════╗');
-    console.log('║   BIT Non-Teaching Staff Portal — Backend    ║');
-    console.log('╠══════════════════════════════════════════════╣');
-    console.log(`║  Server running on port    : ${PORT}              ║`);
-    console.log(`║  Environment               : ${process.env.NODE_ENV}         ║`);
-    console.log(`║  Client URL                : ${process.env.CLIENT_URL} ║`);
-    console.log('╚══════════════════════════════════════════════╝');
-    console.log('');
+    console.log(`Server running on port    : ${PORT}`);
+    console.log(`Environment               : ${process.env.NODE_ENV}`);
+    console.log(`Client URL                : ${process.env.CLIENT_URL}`);
   });
 };
 

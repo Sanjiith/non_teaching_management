@@ -18,16 +18,19 @@ import LoginPage from '../pages/auth/LoginPage';
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import AdminAttendancePage from '../pages/admin/AdminAttendancePage';
 import AdminLeavePage from '../pages/admin/AdminLeavePage';
+import AdminShiftPage from '../pages/admin/AdminShiftPage';
 
 // HOD pages
 import HODDashboard from '../pages/hod/HODDashboard';
 import HODAttendancePage from '../pages/hod/HODAttendancePage';
 import HODLeavePage from '../pages/hod/HODLeavePage';
+import HODSchedulePage from '../pages/hod/HODSchedulePage';
 
 // Staff pages
 import StaffDashboard from '../pages/staff/StaffDashboard';
 import StaffAttendancePage from '../pages/staff/StaffAttendancePage';
 import StaffLeavePage from '../pages/staff/StaffLeavePage';
+import StaffSchedulePage from '../pages/staff/StaffSchedulePage';
 
 // Placeholder for future pages
 const ComingSoon = ({ title }) => (
@@ -74,7 +77,7 @@ const AppRoutes = () => {
         <Route path="attendance"  element={<AdminAttendancePage />} />
         <Route path="leave"       element={<AdminLeavePage />} />
         <Route path="payroll"     element={<ComingSoon title="Payroll Processing" />} />
-        <Route path="shifts"      element={<ComingSoon title="Shift Scheduling" />} />
+        <Route path="shifts"      element={<AdminShiftPage />} />
       </Route>
 
       {/* ── HOD routes ─────────────────────────────────────────────── */}
@@ -91,7 +94,7 @@ const AppRoutes = () => {
         <Route path="staff"      element={<ComingSoon title="Department Staff" />} />
         <Route path="attendance" element={<HODAttendancePage />} />
         <Route path="leave"      element={<HODLeavePage />} />
-        <Route path="schedule"   element={<ComingSoon title="Staff Schedules" />} />
+        <Route path="schedule"   element={<HODSchedulePage />} />
       </Route>
 
       {/* ── Staff routes ───────────────────────────────────────────── */}
@@ -108,6 +111,7 @@ const AppRoutes = () => {
         <Route path="profile"    element={<ComingSoon title="My Profile" />} />
         <Route path="attendance" element={<StaffAttendancePage />} />
         <Route path="leave"      element={<StaffLeavePage />} />
+        <Route path="schedule"   element={<StaffSchedulePage />} />
         <Route path="payroll"    element={<ComingSoon title="My Payroll" />} />
       </Route>
 

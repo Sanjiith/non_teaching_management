@@ -10,6 +10,7 @@ const pageTitles = {
   [ROUTES.STAFF_PROFILE]:    'My Profile',
   [ROUTES.STAFF_ATTENDANCE]: 'My Attendance',
   [ROUTES.STAFF_LEAVE]:      'My Leave',
+  [ROUTES.STAFF_SCHEDULE]:   'My Schedule',
   [ROUTES.STAFF_PAYROLL]:    'My Payroll',
 };
 
@@ -18,6 +19,7 @@ const navItems = [
   { label: 'My Profile',   icon: 'person',          path: ROUTES.STAFF_PROFILE },
   { label: 'My Attendance',icon: 'calendar_month',  path: ROUTES.STAFF_ATTENDANCE },
   { label: 'My Leave',     icon: 'event_busy',      path: ROUTES.STAFF_LEAVE },
+  { label: 'My Schedule',  icon: 'schedule',        path: ROUTES.STAFF_SCHEDULE },
   { label: 'My Payroll',   icon: 'payments',        path: ROUTES.STAFF_PAYROLL },
 ];
 

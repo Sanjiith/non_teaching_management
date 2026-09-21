@@ -6,6 +6,7 @@ import { getRoleLabel } from '../../utils/roleHelpers';
 import { ROUTES } from '../../config/constants';
 import { getMyAttendance } from '../../services/attendance.service';
 import { getMyLeaves, applyLeave } from '../../services/leave.service';
+import { getMySchedules } from '../../services/schedule.service';
 
 const InfoRow = ({ label, value }) => (
   <div className="flex flex-col sm:flex-row sm:items-center py-sm border-b border-outline-variant last:border-0">
@@ -27,6 +28,7 @@ const StaffDashboard = () => {
   });
   const [leavesList, setLeavesList] = useState([]);
   const [balances, setBalances] = useState(null);
+  const [todayShift, setTodayShift] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Apply Leave Modal state
@@ -46,9 +48,10 @@ const StaffDashboard = () => {
   const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      const [attData, leavesData] = await Promise.all([
+      const [attData, leavesData, schedData] = await Promise.all([
         getMyAttendance({ limit: 7 }),
         getMyLeaves({ limit: 5 }),
+        getMySchedules(),
       ]);
 
       setAttendanceRecords(attData.records || []);
@@ -59,6 +62,12 @@ const StaffDashboard = () => {
       } else if (user?.leaveBalances) {
         setBalances(user.leaveBalances);
       }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const foundToday = (schedData || []).find(
+        (s) => new Date(s.date).toISOString().split('T')[0] === todayStr
+      );
+      setTodayShift(foundToday || null);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -206,6 +215,32 @@ const StaffDashboard = () => {
               <div className="kpi-value text-emerald-700">{attendanceStats.attendanceRate}%</div>
               <div className="kpi-sub">Dynamic rate</div>
             </div>
+          </div>
+
+          {/* Today's Shift Card */}
+          <div className="bit-card p-md border-l-4 border-l-primary flex flex-col sm:flex-row justify-between items-start sm:items-center gap-md">
+            <div className="space-y-xs">
+              <div className="flex items-center gap-xs">
+                <span className="material-symbols-outlined text-primary text-xl">schedule</span>
+                <span className="font-label-md text-label-md text-secondary uppercase font-semibold">Today's Duty Shift</span>
+                {todayShift && <StatusBadge status={todayShift.status} />}
+              </div>
+              <p className="font-title-md text-title-md text-on-surface font-bold">
+                {todayShift ? todayShift.shift?.name : 'No Shift Scheduled for Today'}
+              </p>
+              <p className="font-body-sm text-body-sm text-outline">
+                {todayShift
+                  ? `Timing: ${todayShift.startTime} – ${todayShift.endTime} (${todayShift.shift?.workingHours || 8} hrs) • ${todayShift.remarks || 'Regular duty'}`
+                  : 'You do not have an active shift assignment for today.'}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(ROUTES.STAFF_SCHEDULE)}
+              className="btn-secondary text-xs flex items-center gap-xs whitespace-nowrap self-stretch sm:self-auto justify-center"
+            >
+              <span className="material-symbols-outlined text-sm">calendar_month</span>
+              My Roster
+            </button>
           </div>
 
           {/* Actual Attendance log */}

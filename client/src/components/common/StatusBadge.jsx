@@ -21,6 +21,11 @@ const statusConfig = {
   Draft:      { cls: 'badge-neutral', icon: 'draft' },
   Processed:  { cls: 'badge-info',    icon: 'receipt' },
   Paid:       { cls: 'badge-success', icon: 'payments' },
+  // Shift & Schedule
+  Scheduled:    { cls: 'badge-info',    icon: 'event_available' },
+  Completed:    { cls: 'badge-success', icon: 'task_alt' },
+  'On Leave':   { cls: 'badge-warning', icon: 'flight_takeoff' },
+  Conflict:     { cls: 'badge-error',   icon: 'warning' },
   // Generic
   Active:     { cls: 'badge-success', icon: 'circle' },
   Inactive:   { cls: 'badge-error',   icon: 'circle' },

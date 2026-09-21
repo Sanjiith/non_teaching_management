@@ -9,6 +9,7 @@ require('./models/Department.model');
 require('./models/Attendance.model');
 require('./models/Leave.model');
 require('./models/Shift.model');
+require('./models/Schedule.model');
 require('./models/Payroll.model');
 require('./models/Notification.model');
 
@@ -18,6 +19,8 @@ const userRoutes = require('./routes/user.routes');
 const departmentRoutes = require('./routes/department.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
 const leaveRoutes = require('./routes/leave.routes');
+const shiftRoutes = require('./routes/shift.routes');
+const scheduleRoutes = require('./routes/schedule.routes');
 
 const app = express();
 
@@ -56,6 +59,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leaves', leaveRoutes);
+app.use('/api/shifts', shiftRoutes);
+app.use('/api/schedules', scheduleRoutes);
 
 // 404 handler
 app.use((req, res) => {

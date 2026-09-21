@@ -14,6 +14,8 @@ const User = require('../models/User.model');
 const Department = require('../models/Department.model');
 const Attendance = require('../models/Attendance.model');
 const Leave = require('../models/Leave.model');
+const Shift = require('../models/Shift.model');
+const Schedule = require('../models/Schedule.model');
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -42,13 +44,17 @@ const seed = async () => {
     await Department.deleteMany({});
     await Attendance.deleteMany({});
     await Leave.deleteMany({});
+    await Shift.deleteMany({});
+    await Schedule.deleteMany({});
 
-    // Drop any legacy indexes on Attendance
+    // Drop legacy indexes
     try {
       await Attendance.collection.dropIndexes();
       await Attendance.syncIndexes();
+      await Schedule.collection.dropIndexes();
+      await Schedule.syncIndexes();
     } catch (e) {
-      // Ignore if collection was newly created
+      // Ignore if collections are new
     }
 
     // Create departments
@@ -271,9 +277,155 @@ const seed = async () => {
     ]);
     console.log('   ✓ 3 sample leave applications created (Pending HOD approval)');
 
+    // Seed Shifts
+    console.log('⏰ Creating shifts...');
+    const shiftsData = [
+      {
+        name: 'Morning Shift',
+        startTime: '08:00',
+        endTime: '16:00',
+        workingHours: 8,
+        department: null,
+        description: 'Morning standard campus shift',
+        isActive: true,
+      },
+      {
+        name: 'General Shift',
+        startTime: '09:00',
+        endTime: '17:00',
+        workingHours: 8,
+        department: null,
+        description: 'General administration and lab shift',
+        isActive: true,
+      },
+      {
+        name: 'Evening Shift',
+        startTime: '14:00',
+        endTime: '22:00',
+        workingHours: 8,
+        department: null,
+        description: 'Evening lab and campus maintenance shift',
+        isActive: true,
+      },
+      {
+        name: 'Night Shift',
+        startTime: '22:00',
+        endTime: '06:00',
+        workingHours: 8,
+        department: null,
+        description: 'Night security and equipment surveillance shift',
+        isActive: true,
+      },
+      {
+        name: 'CSE Lab Shift',
+        startTime: '08:30',
+        endTime: '16:30',
+        workingHours: 8,
+        department: deptMap['CSE'],
+        description: 'Departmental lab maintenance and setup',
+        isActive: true,
+      },
+    ];
+
+    const createdShifts = await Shift.insertMany(shiftsData);
+    console.log(`   ✓ ${createdShifts.length} shifts created`);
+
+    const morningShift = createdShifts.find((s) => s.name === 'Morning Shift');
+    const generalShift = createdShifts.find((s) => s.name === 'General Shift');
+    const eveningShift = createdShifts.find((s) => s.name === 'Evening Shift');
+
+    // Seed Schedules
+    console.log('📅 Creating sample shift schedules...');
+    const today = normalizeDate(now);
+    const yesterday = new Date(today);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const tomorrow = new Date(today);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const dayAfter = new Date(today);
+    dayAfter.setUTCDate(dayAfter.getUTCDate() + 2);
+
+    const schedulesData = [
+      // Rajesh Kumar (CSE)
+      {
+        staff: staffUsers[0]._id,
+        department: deptMap['CSE'],
+        shift: generalShift._id,
+        date: yesterday,
+        startTime: generalShift.startTime,
+        endTime: generalShift.endTime,
+        status: 'Completed',
+        remarks: 'Completed regular shift',
+      },
+      {
+        staff: staffUsers[0]._id,
+        department: deptMap['CSE'],
+        shift: generalShift._id,
+        date: today,
+        startTime: generalShift.startTime,
+        endTime: generalShift.endTime,
+        status: 'Scheduled',
+        remarks: 'Main lab duty',
+      },
+      {
+        staff: staffUsers[0]._id,
+        department: deptMap['CSE'],
+        shift: morningShift._id,
+        date: tomorrow,
+        startTime: morningShift.startTime,
+        endTime: morningShift.endTime,
+        status: 'Scheduled',
+        remarks: 'Morning server check',
+      },
+      // Meena Devi (CSE)
+      {
+        staff: staffUsers[1]._id,
+        department: deptMap['CSE'],
+        shift: morningShift._id,
+        date: today,
+        startTime: morningShift.startTime,
+        endTime: morningShift.endTime,
+        status: 'Scheduled',
+        remarks: 'Department office duty',
+      },
+      {
+        staff: staffUsers[1]._id,
+        department: deptMap['CSE'],
+        shift: eveningShift._id,
+        date: tomorrow,
+        startTime: eveningShift.startTime,
+        endTime: eveningShift.endTime,
+        status: 'Scheduled',
+        remarks: 'Evening record update',
+      },
+      // Suresh Babu (ECE)
+      {
+        staff: staffUsers[2]._id,
+        department: deptMap['ECE'],
+        shift: generalShift._id,
+        date: today,
+        startTime: generalShift.startTime,
+        endTime: generalShift.endTime,
+        status: 'Scheduled',
+        remarks: 'ECE hardware lab',
+      },
+      {
+        staff: staffUsers[2]._id,
+        department: deptMap['ECE'],
+        shift: generalShift._id,
+        date: tomorrow,
+        startTime: generalShift.startTime,
+        endTime: generalShift.endTime,
+        status: 'Scheduled',
+        remarks: 'ECE lab assistance',
+      },
+    ];
+
+    await Schedule.insertMany(schedulesData);
+    console.log(`   ✓ ${schedulesData.length} shift schedules created`);
+
     console.log('');
     console.log('════════════════════════════════════════════');
-    console.log('✅ Seed completed successfully with Day 3 data!');
+    console.log('✅ Seed completed successfully with Day 4 data!');
     console.log('');
     console.log('Login Credentials:');
     console.log('  Admin  : BIT-ADM-001 / Admin@123');

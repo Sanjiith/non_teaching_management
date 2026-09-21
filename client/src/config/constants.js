@@ -36,5 +36,6 @@ export const ROUTES = {
   STAFF_PROFILE: '/staff/profile',
   STAFF_ATTENDANCE: '/staff/attendance',
   STAFF_LEAVE: '/staff/leave',
+  STAFF_SCHEDULE: '/staff/schedule',
   STAFF_PAYROLL: '/staff/payroll',
 };
