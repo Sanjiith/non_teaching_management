@@ -63,10 +63,11 @@ const sumObject = (obj = {}) =>
  * Computes the full payroll record for one user in one month.
  *
  * @param {object} params
- * @param {object}   params.user           User document (must have .basicSalary)
+ * @param {object}   params.user           User document (must have .basicSalary, .leaveBalances)
  * @param {number}   params.month          1–12
  * @param {number}   params.year
  * @param {object[]} params.attendanceRecords  Array of Attendance documents for this user/month
+ * @param {number}   params.priorYtdLeaves     Total leaves taken in previous months of this year
  * @param {Date[]}   params.holidays       Array of Date objects (UTC midnight) for this month
  * @param {object}   params.allowances     Optional extra allowances {hra,da,ta,medical,other}
  * @param {object}   params.deductions     Optional extra deductions {pf,pt,tds,loanRepayment,other}
@@ -77,6 +78,7 @@ const computePayroll = ({
   month,
   year,
   attendanceRecords = [],
+  priorYtdLeaves = 0,
   holidays = [],
   allowances = {},
   deductions = {},
@@ -111,8 +113,18 @@ const computePayroll = ({
     else if (s === 'Holiday') holidayDays++;
   });
 
+  // ── Leave Cap & Excess ────────────────────────────────────────────
+  const earnedLeaveLimit = user.leaveBalances?.earnedLeave?.total || 12;
+  const remainingPaidLeavesBeforeThisMonth = Math.max(0, earnedLeaveLimit - priorYtdLeaves);
+  
+  // Paid leaves in this month can't exceed what's left
+  const paidLeaveDays = Math.min(leaveDays, remainingPaidLeavesBeforeThisMonth);
+  const excessLeaveDays = leaveDays - paidLeaveDays;
+
   // ── Deduction calculation ─────────────────────────────────────────
-  const absenceDeduction = parseFloat((absentDays * dailySalary).toFixed(2));
+  // Deduct for both unauthorized absent and excess leaves
+  const deductionDays = absentDays + excessLeaveDays;
+  const absenceDeduction = parseFloat((deductionDays * dailySalary).toFixed(2));
 
   // ── Extras ────────────────────────────────────────────────────────
   const normalizedAllowances = {
@@ -152,6 +164,7 @@ const computePayroll = ({
     totalWorkingDays,
     presentDays,
     leaveDays,
+    excessLeaveDays,
     absentDays,
     weeklyOffDays,
     holidayDays,

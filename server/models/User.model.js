@@ -86,7 +86,7 @@ const userSchema = new mongoose.Schema(
         reserved: { type: Number, default: 0, min: 0 },
       },
       earnedLeave: {
-        total: { type: Number, default: 30, min: 0 },
+        total: { type: Number, default: 12, min: 0 },
         used: { type: Number, default: 0, min: 0 },
         reserved: { type: Number, default: 0, min: 0 },
       },

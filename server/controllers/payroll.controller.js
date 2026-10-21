@@ -25,6 +25,22 @@ const fetchAttendance = async (userId, year, month) => {
   });
 };
 
+/**
+ * Fetches total Leave records for a user from Jan 1 up to the end of the prior month.
+ */
+const fetchPriorYTDLeaves = async (userId, year, month) => {
+  if (month === 1) return 0; // No prior months in Jan
+  const startOfYear = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  const endOfPrevMonth = new Date(Date.UTC(year, month - 1, 0, 23, 59, 59, 999));
+  
+  const count = await Attendance.countDocuments({
+    user: userId,
+    date: { $gte: startOfYear, $lte: endOfPrevMonth },
+    status: { $in: ['Leave', 'On-Leave'] }
+  });
+  return count;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // @desc    Preview payroll calculation without saving (dry run)
 // @route   POST /api/payroll/preview
@@ -36,16 +52,18 @@ const previewPayroll = async (req, res) => {
     const m = parseInt(month, 10);
     const y = parseInt(year, 10);
 
-    const user = await User.findById(userId).select('name employeeId staffId basicSalary department designation');
+    const user = await User.findById(userId).select('name employeeId staffId basicSalary department designation leaveBalances');
     if (!user) return sendError(res, 404, 'Staff member not found.');
 
     const attendanceRecords = await fetchAttendance(userId, y, m);
+    const priorYtdLeaves = await fetchPriorYTDLeaves(userId, y, m);
 
     const breakdown = computePayroll({
       user,
       month: m,
       year: y,
       attendanceRecords,
+      priorYtdLeaves,
       holidays: [],
       allowances,
       deductions,
@@ -91,7 +109,7 @@ const generatePayroll = async (req, res) => {
     // Determine target users
     let targetUsers = [];
     if (userId) {
-      const u = await User.findById(userId).select('name employeeId staffId basicSalary department designation role');
+      const u = await User.findById(userId).select('name employeeId staffId basicSalary department designation role leaveBalances');
       if (!u) return sendError(res, 404, 'Staff member not found.');
       targetUsers = [u];
     } else {
@@ -99,7 +117,7 @@ const generatePayroll = async (req, res) => {
       targetUsers = await User.find({
         role: { $in: ['Staff', 'Non-Teaching Staff', 'HOD'] },
         isActive: true,
-      }).select('name employeeId staffId basicSalary department designation role');
+      }).select('name employeeId staffId basicSalary department designation role leaveBalances');
     }
 
     if (targetUsers.length === 0) {
@@ -123,12 +141,14 @@ const generatePayroll = async (req, res) => {
         }
 
         const attendanceRecords = await fetchAttendance(user._id, y, m);
+        const priorYtdLeaves = await fetchPriorYTDLeaves(user._id, y, m);
 
         const breakdown = computePayroll({
           user,
           month: m,
           year: y,
           attendanceRecords,
+          priorYtdLeaves,
           holidays: [],
           allowances,
           deductions,
@@ -143,6 +163,7 @@ const generatePayroll = async (req, res) => {
           totalWorkingDays: breakdown.totalWorkingDays,
           presentDays: breakdown.presentDays,
           leaveDays: breakdown.leaveDays,
+          excessLeaveDays: breakdown.excessLeaveDays,
           absentDays: breakdown.absentDays,
           weeklyOffDays: breakdown.weeklyOffDays,
           holidayDays: breakdown.holidayDays,

@@ -20,11 +20,41 @@ const getAllDepartments = async (req, res) => {
 
     const departments = await Department.find(filter)
       .populate('hod', 'name employeeId staffId email designation phone')
+      .lean()
       .sort({ name: 1 });
 
+    // Calculate strengths from User model
+    const deptIds = departments.map((d) => d._id);
+    const userStats = await User.aggregate([
+      { $match: { department: { $in: deptIds } } },
+      {
+        $group: {
+          _id: '$department',
+          total: { $sum: 1 },
+          active: { $sum: { $cond: ['$isActive', 1, 0] } },
+          inactive: { $sum: { $cond: ['$isActive', 0, 1] } },
+        },
+      },
+    ]);
+
+    const statsMap = {};
+    userStats.forEach((stat) => {
+      statsMap[stat._id.toString()] = stat;
+    });
+
+    const enrichedDepartments = departments.map((dept) => {
+      const stats = statsMap[dept._id.toString()] || { total: 0, active: 0, inactive: 0 };
+      return {
+        ...dept,
+        strength: stats.total,
+        activeCount: stats.active,
+        inactiveCount: stats.inactive,
+      };
+    });
+
     return sendSuccess(res, 200, 'Departments fetched successfully', {
-      count: departments.length,
-      departments,
+      count: enrichedDepartments.length,
+      departments: enrichedDepartments,
     });
   } catch (error) {
     return sendError(res, 500, error.message);
@@ -70,7 +100,28 @@ const getDepartmentById = async (req, res) => {
       }
     }
 
-    return sendSuccess(res, 200, 'Department fetched successfully', { department });
+    // Get staff counts
+    const userStats = await User.aggregate([
+      { $match: { department: department._id } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          active: { $sum: { $cond: ['$isActive', 1, 0] } },
+          inactive: { $sum: { $cond: ['$isActive', 0, 1] } },
+        },
+      },
+    ]);
+    const stats = userStats[0] || { total: 0, active: 0, inactive: 0 };
+    
+    const departmentData = {
+      ...department.toObject(),
+      strength: stats.total,
+      activeCount: stats.active,
+      inactiveCount: stats.inactive,
+    };
+
+    return sendSuccess(res, 200, 'Department fetched successfully', { department: departmentData });
   } catch (error) {
     return sendError(res, 500, error.message);
   }

@@ -67,6 +67,11 @@ const payrollSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    excessLeaveDays: {
+      // Leaves taken beyond entitlement (cause deduction)
+      type: Number,
+      default: 0,
+    },
     absentDays: {
       // Unauthorized absences (cause deduction)
       type: Number,

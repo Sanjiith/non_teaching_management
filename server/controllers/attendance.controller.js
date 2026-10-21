@@ -81,8 +81,10 @@ const getMyAttendance = async (req, res) => {
     }
 
     const records = await query;
-    const allRecordsForUser = await Attendance.find({ user: userId });
-    const stats = calculateAttendanceStats(allRecordsForUser);
+
+    // Stats are calculated from the same period-filtered records so that
+    // the attendance rate reflects only the selected month/year, not all history.
+    const stats = calculateAttendanceStats(records);
 
     return sendSuccess(res, 200, 'Attendance fetched successfully', {
       count: records.length,

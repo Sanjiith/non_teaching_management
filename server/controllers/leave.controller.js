@@ -4,6 +4,17 @@ const User = require('../models/User.model');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { normalizeRole } = require('../middleware/role.middleware');
 const notificationService = require('../services/notification.service');
+const { parseTimeToMinutes } = require('../validators/leave.validator');
+
+/**
+ * Returns a fresh default balance object for the given leave balance key.
+ * All leave types are capped at 12 days per year for Non-Teaching Staff.
+ * @param {string} balanceKey - e.g. 'casualLeave', 'medicalLeave', 'earnedLeave'
+ */
+const getDefaultBalance = (balanceKey) => {
+  // Per policy: Casual=12, Medical=12, Earned=12
+  return { total: 12, used: 0, reserved: 0 };
+};
 
 /**
  * Normalizes Date string or Date object to midnight UTC
@@ -40,6 +51,45 @@ const calculateDays = (startInput, endInput, startTime, endTime) => {
 };
 
 /**
+ * Checks whether two leave requests overlap, considering both date ranges and times.
+ * Returns true if they overlap.
+ *
+ * Overlap logic:
+ *   Two intervals [A_start, A_end] and [B_start, B_end] overlap when:
+ *     A_start <= B_end  AND  A_end >= B_start
+ *
+ * For same-day leaves we additionally compare times.
+ */
+const leavesOverlap = (newStart, newEnd, newStartTime, newEndTime, existStart, existEnd, existStartTime, existEndTime) => {
+  // Compare calendar dates only first
+  // newStart/newEnd are already UTC-midnight Date objects
+  if (newEnd < existStart || newStart > existEnd) {
+    return false; // No date-range overlap at all
+  }
+
+  // Check same-day scenario: both leaves are on the exact same single day
+  const newIsSingleDay = newStart.getTime() === newEnd.getTime();
+  const existIsSingleDay = existStart.getTime() === existEnd.getTime();
+  const singleDayMatch = newStart.getTime() === existStart.getTime();
+
+  if (newIsSingleDay && existIsSingleDay && singleDayMatch) {
+    // Both are same-day leaves on the same calendar date — compare times
+    const newS = parseTimeToMinutes(newStartTime);
+    const newE = parseTimeToMinutes(newEndTime);
+    const exS = parseTimeToMinutes(existStartTime);
+    const exE = parseTimeToMinutes(existEndTime);
+
+    if (newS !== null && newE !== null && exS !== null && exE !== null) {
+      // Time-based overlap: new.start < exist.end AND new.end > exist.start
+      return newS < exE && newE > exS;
+    }
+  }
+
+  // Multi-day or mixed scenario — date-range overlap already confirmed above
+  return true;
+};
+
+/**
  * @desc    Apply for leave
  * @route   POST /api/leaves
  * @access  Private (Staff)
@@ -68,7 +118,60 @@ const applyLeave = async (req, res) => {
       return sendError(res, 400, 'Please provide leave type, start date, end date, and reason.');
     }
 
-    const calculatedDays = calculateDays(actualStart, actualEnd, startTime, endTime);
+    // ── BACKEND GUARD: past-date rejection ─────────────────────────────────
+    const nowUTC = new Date();
+    const todayUTC = new Date(
+      Date.UTC(nowUTC.getUTCFullYear(), nowUTC.getUTCMonth(), nowUTC.getUTCDate())
+    );
+    const newFromDate = normalizeDateToUTC(actualStart);
+    if (newFromDate < todayUTC) {
+      return sendError(res, 400, 'Start date cannot be in the past.');
+    }
+
+    const newToDate = normalizeDateToUTC(actualEnd);
+    if (newToDate < newFromDate) {
+      return sendError(res, 400, 'End date cannot be before start date.');
+    }
+
+    const actualStartTime = startTime || '09:00 AM';
+    const actualEndTime = endTime || '05:00 PM';
+
+    // Same-day time validation
+    if (newFromDate.getTime() === newToDate.getTime()) {
+      const startMins = parseTimeToMinutes(actualStartTime);
+      const endMins = parseTimeToMinutes(actualEndTime);
+      if (startMins !== null && endMins !== null && startMins >= endMins) {
+        return sendError(res, 400, 'For same-day leave, start time must be before end time.');
+      }
+    }
+
+    // ── OVERLAP VALIDATION ─────────────────────────────────────────────────
+    // Only Pending and Approved leaves are considered "active" blockers.
+    const existingLeaves = await Leave.find({
+      user: userId,
+      status: { $in: ['Pending', 'Approved'] },
+    }).select('fromDate toDate startTime endTime status');
+
+    for (const existing of existingLeaves) {
+      const exStart = normalizeDateToUTC(existing.fromDate);
+      const exEnd = normalizeDateToUTC(existing.toDate);
+
+      if (
+        leavesOverlap(
+          newFromDate, newToDate, actualStartTime, actualEndTime,
+          exStart, exEnd, existing.startTime, existing.endTime
+        )
+      ) {
+        return sendError(
+          res,
+          409,
+          'You already have a leave request during this period. Please choose different dates.'
+        );
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────────
+
+    const calculatedDays = calculateDays(actualStart, actualEnd, actualStartTime, actualEndTime);
     const totalDays = customDays ? Number(customDays) : calculatedDays;
 
     if (totalDays <= 0) {
@@ -82,7 +185,7 @@ const applyLeave = async (req, res) => {
     }
 
     const balanceKey = user.getLeaveBalanceKey(actualType);
-    const balance = user.leaveBalances?.[balanceKey] || { total: 12, used: 0, reserved: 0 };
+    const balance = user.leaveBalances?.[balanceKey] || getDefaultBalance(balanceKey);
     const available = balance.total - balance.used - (balance.reserved || 0);
 
     if (totalDays > available) {
@@ -98,7 +201,7 @@ const applyLeave = async (req, res) => {
       user.leaveBalances = {};
     }
     if (!user.leaveBalances[balanceKey]) {
-      user.leaveBalances[balanceKey] = { total: 12, used: 0, reserved: 0 };
+      user.leaveBalances[balanceKey] = getDefaultBalance(balanceKey);
     }
     user.leaveBalances[balanceKey].reserved = (user.leaveBalances[balanceKey].reserved || 0) + totalDays;
     user.markModified('leaveBalances');
@@ -108,10 +211,10 @@ const applyLeave = async (req, res) => {
       user: userId,
       department: user.department?._id || user.department || null,
       type: actualType,
-      fromDate: normalizeDateToUTC(actualStart),
-      toDate: normalizeDateToUTC(actualEnd),
-      startTime: startTime || '09:00 AM',
-      endTime: endTime || '05:00 PM',
+      fromDate: newFromDate,
+      toDate: newToDate,
+      startTime: actualStartTime,
+      endTime: actualEndTime,
       totalDays,
       reason: reason.trim(),
       status: 'Pending',
@@ -292,7 +395,7 @@ const approveLeave = async (req, res) => {
     const balanceKey = user.getLeaveBalanceKey(leave.type);
     if (!user.leaveBalances) user.leaveBalances = {};
     if (!user.leaveBalances[balanceKey]) {
-      user.leaveBalances[balanceKey] = { total: 12, used: 0, reserved: 0 };
+      user.leaveBalances[balanceKey] = getDefaultBalance(balanceKey);
     }
 
     // Deduct leave balance permanently and release reserved
@@ -309,10 +412,12 @@ const approveLeave = async (req, res) => {
     await leave.save();
 
     // ─── SOURCE OF TRUTH PROPAGATION: APPROVED LEAVE → ATTENDANCE ─────────
-    // Create/update attendance records for each date in the leave range to 'Leave'
-    // Uses findOneAndUpdate with upsert to guarantee NO DUPLICATES!
+    // For each calendar date in the leave range, upsert an attendance record
+    // with status 'Leave'.  We use $set so existing fields (checkIn, checkOut,
+    // shift) are preserved on UPDATE, and $setOnInsert to set user/date on INSERT.
+    // The compound unique index {user, date} prevents duplicate documents.
     const start = normalizeDateToUTC(leave.fromDate);
-    const end = normalizeDateToUTC(leave.toDate);
+    const end   = normalizeDateToUTC(leave.toDate);
 
     const currentDate = new Date(start);
     const updatedAttendanceDates = [];
@@ -323,10 +428,14 @@ const approveLeave = async (req, res) => {
       await Attendance.findOneAndUpdate(
         { user: leave.user, date: dayDate },
         {
-          user: leave.user,
-          date: dayDate,
-          status: 'Leave',
-          remarks: `Approved ${leave.type}`,
+          $set: {
+            status: 'Leave',
+            remarks: `Approved ${leave.type} (Leave ID: ${leave._id})`,
+          },
+          $setOnInsert: {
+            user: leave.user,
+            date: dayDate,
+          },
         },
         { upsert: true, new: true, runValidators: true }
       );

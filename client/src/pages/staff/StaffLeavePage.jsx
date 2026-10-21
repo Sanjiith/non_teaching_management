@@ -1,9 +1,88 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getMyLeaves, applyLeave, cancelLeave } from '../../services/leave.service';
 import { exportCSV, getLeaveBalanceWarning } from '../../utils/exportCSV';
 
+// ─── Date helpers ────────────────────────────────────────────────────────────
+
+/** Returns today's date in YYYY-MM-DD (local time) — used for <input min> */
+const getTodayLocal = () => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+/** Parse "HH:MM AM/PM" or "HH:MM" (24h) → minutes since midnight. Returns null on failure. */
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const t = timeStr.trim().toUpperCase();
+
+  const ampm = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = parseInt(ampm[2], 10);
+    if (ampm[3] === 'AM') { if (h === 12) h = 0; }
+    else { if (h !== 12) h += 12; }
+    return h * 60 + m;
+  }
+
+  const h24 = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24) return parseInt(h24[1], 10) * 60 + parseInt(h24[2], 10);
+
+  return null;
+};
+
+/**
+ * Client-side overlap check against existing leaves.
+ * Returns true if [newStart, newEnd, newST, newET] overlaps with `existing`.
+ * Only checks leaves with status Pending or Approved.
+ */
+const overlapsExisting = (newStart, newEnd, newST, newET, existing) => {
+  const exStart = new Date(existing.fromDate);
+  const exEnd   = new Date(existing.toDate);
+
+  // Normalise all to midnight UTC for date comparison
+  const ns = new Date(Date.UTC(
+    new Date(newStart).getFullYear(),
+    new Date(newStart).getMonth(),
+    new Date(newStart).getDate()
+  ));
+  const ne = new Date(Date.UTC(
+    new Date(newEnd).getFullYear(),
+    new Date(newEnd).getMonth(),
+    new Date(newEnd).getDate()
+  ));
+  const es = new Date(Date.UTC(exStart.getUTCFullYear(), exStart.getUTCMonth(), exStart.getUTCDate()));
+  const ee = new Date(Date.UTC(exEnd.getUTCFullYear(), exEnd.getUTCMonth(), exEnd.getUTCDate()));
+
+  // No date-range overlap → safe
+  if (ne < es || ns > ee) return false;
+
+  // Same-day both sides → compare times
+  const newIsSingle  = ns.getTime() === ne.getTime();
+  const existIsSingle = es.getTime() === ee.getTime();
+  const sameDayStart = ns.getTime() === es.getTime();
+
+  if (newIsSingle && existIsSingle && sameDayStart) {
+    const nS = parseTimeToMinutes(newST);
+    const nE = parseTimeToMinutes(newET);
+    const eS = parseTimeToMinutes(existing.startTime);
+    const eE = parseTimeToMinutes(existing.endTime);
+    if (nS !== null && nE !== null && eS !== null && eE !== null) {
+      return nS < eE && nE > eS;
+    }
+  }
+
+  return true; // multi-day or mixed — date overlap confirmed
+};
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
 const StaffLeavePage = () => {
+  const todayStr = useMemo(() => getTodayLocal(), []);
+
   const [leaves, setLeaves] = useState([]);
   const [balances, setBalances] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,14 +117,55 @@ const StaffLeavePage = () => {
     fetchLeaves();
   }, [fetchLeaves]);
 
+  // ─── Frontend validation ────────────────────────────────────────────────
+
+  const validateForm = () => {
+    const { startDate, endDate, startTime, endTime, reason } = form;
+
+    if (!startDate) return 'Start date is required.';
+    if (!endDate)   return 'End date is required.';
+    if (!reason.trim()) return 'Reason is required.';
+
+    // Past-date check (client-side)
+    if (startDate < todayStr) return 'Start date cannot be in the past.';
+    if (endDate   < todayStr) return 'End date cannot be in the past.';
+
+    // End must be >= start
+    if (endDate < startDate) return 'End date cannot be before start date.';
+
+    // Same-day time validation
+    if (startDate === endDate) {
+      const sM = parseTimeToMinutes(startTime);
+      const eM = parseTimeToMinutes(endTime);
+      if (sM === null) return 'Invalid start time format. Use e.g. 09:00 AM.';
+      if (eM === null) return 'Invalid end time format. Use e.g. 05:00 PM.';
+      if (sM >= eM)   return 'For same-day leave, start time must be before end time.';
+    }
+
+    // Overlap check against existing Pending / Approved leaves
+    const activeLeavesToCheck = leaves.filter(
+      (l) => l.status === 'Pending' || l.status === 'Approved'
+    );
+
+    for (const existing of activeLeavesToCheck) {
+      if (overlapsExisting(startDate, endDate, startTime, endTime, existing)) {
+        return 'You already have a leave request during this period. Please choose different dates.';
+      }
+    }
+
+    return null; // no error
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError('');
     setFormSuccess('');
 
-    if (!form.startDate) return setFormError('Start date is required.');
-    if (!form.endDate) return setFormError('End date is required.');
-    if (!form.reason.trim()) return setFormError('Reason is required.');
+    const validationError = validateForm();
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -77,6 +197,13 @@ const StaffLeavePage = () => {
     }
   };
 
+  // Auto-correct endDate if it goes before startDate
+  const handleStartDateChange = (val) => {
+    const next = { ...form, startDate: val };
+    if (form.endDate && form.endDate < val) next.endDate = val;
+    setForm(next);
+  };
+
   const balanceItems = [
     {
       type: 'Casual Leave',
@@ -92,7 +219,7 @@ const StaffLeavePage = () => {
     },
     {
       type: 'Earned Leave',
-      total: balances?.earnedLeave?.total ?? 30,
+      total: balances?.earnedLeave?.total ?? 12,
       used: balances?.earnedLeave?.used ?? 0,
       reserved: balances?.earnedLeave?.reserved ?? 0,
     },
@@ -162,28 +289,33 @@ const StaffLeavePage = () => {
                 </select>
               </div>
 
+              {/* ── Start Date — past dates disabled via min ── */}
               <div>
                 <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Start Date</label>
                 <input
                   type="date"
                   value={form.startDate}
-                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  min={todayStr}
+                  onChange={(e) => handleStartDateChange(e.target.value)}
                   className="bit-input"
                   required
                 />
               </div>
 
+              {/* ── End Date — must be >= startDate ── */}
               <div>
                 <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">End Date</label>
                 <input
                   type="date"
                   value={form.endDate}
+                  min={form.startDate || todayStr}
                   onChange={(e) => setForm({ ...form, endDate: e.target.value })}
                   className="bit-input"
                   required
                 />
               </div>
 
+              {/* ── Times ── */}
               <div className="grid grid-cols-2 gap-xs">
                 <div>
                   <label className="font-label-sm text-label-sm text-secondary uppercase block mb-xs">Start Time</label>
@@ -207,6 +339,14 @@ const StaffLeavePage = () => {
                 </div>
               </div>
 
+              {/* Same-day hint */}
+              {form.startDate && form.endDate && form.startDate === form.endDate && (
+                <p className="text-xs text-amber-600 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-sm">info</span>
+                  Same-day leave — ensure start time is before end time.
+                </p>
+              )}
+
               <div>
                 <label className="font-label-md text-label-md text-on-surface uppercase block mb-xs">Reason</label>
                 <textarea
@@ -220,13 +360,15 @@ const StaffLeavePage = () => {
               </div>
 
               {formError && (
-                <div className="p-sm bg-error-container text-on-error-container rounded text-body-sm">
-                  {formError}
+                <div className="p-sm bg-error-container text-on-error-container rounded text-body-sm flex items-start gap-2">
+                  <span className="material-symbols-outlined text-base flex-shrink-0 mt-0.5">error</span>
+                  <span>{formError}</span>
                 </div>
               )}
 
               {formSuccess && (
-                <div className="p-sm bg-emerald-50 text-emerald-800 rounded text-body-sm">
+                <div className="p-sm bg-emerald-50 text-emerald-800 rounded text-body-sm flex items-center gap-2">
+                  <span className="material-symbols-outlined text-base">check_circle</span>
                   {formSuccess}
                 </div>
               )}
@@ -270,14 +412,14 @@ const StaffLeavePage = () => {
                   <tbody>
                     {leaves.map((l) => {
                       const fromStr = new Date(l.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
-                      const toStr = new Date(l.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                      const toStr   = new Date(l.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
                       const isSameDay = fromStr === toStr;
-                      const dateDisplay = isSameDay ? fromStr : `${fromStr} – ${toStr}`;
+                      const dateDisplay = isSameDay ? `${fromStr} (${l.startTime}–${l.endTime})` : `${fromStr} – ${toStr}`;
 
                       return (
                         <tr key={l._id}>
                           <td className="font-medium">{l.type}</td>
-                          <td className="text-secondary">{dateDisplay}</td>
+                          <td className="text-secondary text-sm">{dateDisplay}</td>
                           <td>{l.totalDays}</td>
                           <td className="text-secondary text-sm max-w-xs truncate" title={l.reason}>
                             {l.reason}

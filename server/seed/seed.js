@@ -132,7 +132,7 @@ const STAFF_BY_DEPT = {
 const DEFAULT_BALANCES = {
   casualLeave:  { total: 12, used: 0, reserved: 0 },
   medicalLeave: { total: 12, used: 0, reserved: 0 },
-  earnedLeave:  { total: 30, used: 0, reserved: 0 },
+  earnedLeave:  { total: 12, used: 0, reserved: 0 },
 };
 
 const toEmail = (name, dept) => {

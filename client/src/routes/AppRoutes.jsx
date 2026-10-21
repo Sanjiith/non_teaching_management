@@ -20,6 +20,8 @@ import AdminAttendancePage from '../pages/admin/AdminAttendancePage';
 import AdminLeavePage from '../pages/admin/AdminLeavePage';
 import AdminShiftPage from '../pages/admin/AdminShiftPage';
 import AdminPayrollPage from '../pages/admin/AdminPayrollPage';
+import AdminStaffPage from '../pages/admin/AdminStaffPage';
+import AdminDepartmentsPage from '../pages/admin/AdminDepartmentsPage';
 
 // HOD pages
 import HODDashboard from '../pages/hod/HODDashboard';
@@ -75,8 +77,8 @@ const AppRoutes = () => {
       >
         <Route index element={<Navigate to={ROUTES.ADMIN_DASHBOARD} replace />} />
         <Route path="dashboard"   element={<AdminDashboard />} />
-        <Route path="staff"       element={<ComingSoon title="Staff Management" />} />
-        <Route path="departments" element={<ComingSoon title="Department Management" />} />
+        <Route path="staff"       element={<AdminStaffPage />} />
+        <Route path="departments" element={<AdminDepartmentsPage />} />
         <Route path="attendance"  element={<AdminAttendancePage />} />
         <Route path="leave"       element={<AdminLeavePage />} />
         <Route path="payroll"     element={<AdminPayrollPage />} />
