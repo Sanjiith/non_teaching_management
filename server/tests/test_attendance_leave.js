@@ -18,9 +18,10 @@ const runTests = async () => {
   await mongoose.connect(MONGODB_URI);
   console.log('✅ Connected\n');
 
+  let staff = null;
   try {
     const admin = await User.findOne({ role: 'Admin' });
-    let staff = await User.findOne({ role: 'Staff', 'leaveBalances.casualLeave.total': 12 });
+    staff = await User.findOne({ role: 'Staff', 'leaveBalances.casualLeave.total': 12 });
     
     if (!staff) {
       staff = await User.findOne({ role: 'Staff' });
@@ -259,6 +260,17 @@ const runTests = async () => {
   } catch (err) {
     console.error(err);
   } finally {
+    if (staff) {
+      await Attendance.deleteMany({ user: staff._id });
+      await Leave.deleteMany({ user: staff._id });
+      await User.findByIdAndUpdate(staff._id, {
+        $set: {
+          'leaveBalances.casualLeave.used': 0,
+          'leaveBalances.casualLeave.reserved': 0,
+          'leaveBalances.casualLeave.balance': 12,
+        },
+      });
+    }
     await mongoose.disconnect();
   }
 };

@@ -44,7 +44,7 @@ const HODDashboard = () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       const [attData, leavesData, schedData, statsData] = await Promise.all([
-        getDepartmentAttendance(),
+        getDepartmentAttendance({ date: today }),
         getDepartmentLeaves({ status: 'Pending' }),
         getDepartmentSchedules({ startDate: today, endDate: today }),
         getAttendanceStats(),
@@ -63,10 +63,22 @@ const HODDashboard = () => {
     loadData();
   }, [loadData]);
 
-  // Consolidate multi-day leaves so they appear as single entries
+  // KPI calculations & filtering for Today
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayRecords = useMemo(() => {
+    return staffAttendance.filter((r) => {
+      const dStr = r.date ? new Date(r.date).toISOString().split('T')[0] : '';
+      return dStr === todayStr;
+    });
+  }, [staffAttendance, todayStr]);
+
+  const presentCount = todayRecords.filter((r) => r.status === 'Present').length;
+  const absentCount = todayRecords.filter((r) => r.status === 'Absent').length;
+
+  // Consolidate multi-day leaves so they appear as single entries for today
   const consolidatedAttendance = useMemo(
-    () => consolidateAttendanceRecords(staffAttendance),
-    [staffAttendance]
+    () => consolidateAttendanceRecords(todayRecords),
+    [todayRecords]
   );
 
   const handleApprove = async (leaveId) => {
@@ -99,15 +111,6 @@ const HODDashboard = () => {
       setProcessingId(null);
     }
   };
-
-  // KPI calculations for Today
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayRecords = staffAttendance.filter((r) => {
-    const dStr = r.date ? new Date(r.date).toISOString().split('T')[0] : '';
-    return dStr === todayStr;
-  });
-  const presentCount = todayRecords.filter((r) => r.status === 'Present').length;
-  const absentCount = todayRecords.filter((r) => r.status === 'Absent').length;
 
   return (
     <div className="space-y-lg">
