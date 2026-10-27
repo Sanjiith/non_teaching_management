@@ -6,6 +6,8 @@ const statusConfig = {
   // Attendance
   Present:      { cls: 'badge-success', icon: 'check_circle' },
   Absent:       { cls: 'badge-error',   icon: 'cancel' },
+  'Uninformed Absence': { cls: 'badge-error', icon: 'person_off' },
+  'Informed Absence':   { cls: 'badge-warning', icon: 'event_busy' },
   Leave:        { cls: 'badge-info',    icon: 'flight_takeoff' },
   'On-Leave':   { cls: 'badge-info',    icon: 'flight_takeoff' },
   Holiday:      { cls: 'badge-neutral', icon: 'beach_access' },
@@ -17,6 +19,7 @@ const statusConfig = {
   // Leave
   Pending:    { cls: 'badge-warning', icon: 'pending' },
   Approved:   { cls: 'badge-success', icon: 'task_alt' },
+  Accepted:   { cls: 'badge-success', icon: 'check_circle' },
   Rejected:   { cls: 'badge-error',   icon: 'block' },
   Cancelled:  { cls: 'badge-neutral', icon: 'do_not_disturb' },
   // Payroll

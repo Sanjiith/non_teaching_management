@@ -275,8 +275,12 @@ const AdminPayrollPage = () => {
                         <td className="text-secondary">{monthName(p.month)} {p.year}</td>
                         <td className="font-mono text-xs">{fmtINR(p.basicSalary)}</td>
                         <td className="font-mono text-xs">{fmtINR(p.applicableSalary)}</td>
-                        <td className="text-center">{p.totalWorkingDays}</td>
-                        <td className="text-center text-error font-semibold">{p.absentDays}</td>
+                        <td className="text-center">
+                          <span className="text-error font-semibold">{p.absentDays}</span>
+                          {p.uninformedAbsentDays > 0 && (
+                            <span className="block text-[11px] text-red-600 font-medium">({p.uninformedAbsentDays} uninformed)</span>
+                          )}
+                        </td>
                         <td className="font-mono text-xs text-error">-{fmtINR(p.absenceDeduction)}</td>
                         <td className="font-mono text-sm font-semibold text-emerald-700">{fmtINR(p.netSalary)}</td>
                         <td><StatusBadge status={p.status} /></td>
@@ -317,7 +321,7 @@ const AdminPayrollPage = () => {
                                 <BreakdownRow label="Working Days"  value={p.totalWorkingDays} />
                                 <BreakdownRow label="Present"       value={p.presentDays} indent />
                                 <BreakdownRow label="Leave"         value={p.leaveDays}   indent />
-                                <BreakdownRow label="Absent"        value={p.absentDays}  indent />
+                                <BreakdownRow label="Absent"        value={`${p.absentDays}${p.uninformedAbsentDays > 0 ? ` (${p.uninformedAbsentDays} uninformed)` : ''}`}  indent />
                                 <BreakdownRow label="Weekly Off"    value={p.weeklyOffDays} indent />
                                 <BreakdownRow label="Holiday"       value={p.holidayDays}   indent />
                               </div>
@@ -476,7 +480,7 @@ const AdminPayrollPage = () => {
                   <p className="font-label-md text-label-md text-secondary uppercase tracking-wide">Attendance</p>
                   <BreakdownRow label="Present Days"   value={preview.breakdown?.presentDays} />
                   <BreakdownRow label="Leave Days"     value={preview.breakdown?.leaveDays} />
-                  <BreakdownRow label="Absent Days"    value={preview.breakdown?.absentDays} />
+                  <BreakdownRow label="Absent Days"    value={`${preview.breakdown?.absentDays || 0}${preview.breakdown?.uninformedAbsentDays > 0 ? ` (${preview.breakdown.uninformedAbsentDays} uninformed)` : ''}`} />
                   <BreakdownRow label="Weekly Off"     value={preview.breakdown?.weeklyOffDays} />
                   <BreakdownRow label="Holiday"        value={preview.breakdown?.holidayDays} />
                 </div>

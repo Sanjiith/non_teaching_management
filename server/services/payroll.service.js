@@ -101,6 +101,7 @@ const computePayroll = ({
   let presentDays = 0;
   let leaveDays = 0;
   let absentDays = 0;
+  let uninformedAbsentDays = 0;
   let weeklyOffDays = 0;
   let holidayDays = 0;
 
@@ -108,7 +109,17 @@ const computePayroll = ({
     const s = record.status;
     if (s === 'Present') presentDays++;
     else if (s === 'Leave' || s === 'On-Leave') leaveDays++;
-    else if (s === 'Absent') absentDays++;
+    else if (s === 'Absent') {
+      absentDays++;
+      if (
+        record.absenceType === 'Uninformed Absence' ||
+        (record.remarks && record.remarks.includes('Uninformed Absence')) ||
+        !record.absenceType ||
+        record.absenceType === 'None'
+      ) {
+        uninformedAbsentDays++;
+      }
+    }
     else if (s === 'Weekly Off') weeklyOffDays++;
     else if (s === 'Holiday') holidayDays++;
   });
@@ -166,6 +177,7 @@ const computePayroll = ({
     leaveDays,
     excessLeaveDays,
     absentDays,
+    uninformedAbsentDays,
     weeklyOffDays,
     holidayDays,
 

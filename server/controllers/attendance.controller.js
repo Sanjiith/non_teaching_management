@@ -11,6 +11,7 @@ const {
   isBeforeCheckInWindow,
   hasCheckInWindowClosed,
   formatTime12Hour,
+  isLeaveCoveringDateTime,
 } = require('../config/attendance.config');
 
 /**
@@ -516,12 +517,15 @@ const getAttendanceStats = async (req, res) => {
 };
 
 /**
+/**
  * Automatically mark absent staff members for a specific date if check-in period has ended.
  * Rules:
  * 1. Only runs if the window has closed for targetDate (or targetDate is in the past).
  * 2. Does NOT mark staff absent if they have an approved leave covering targetDate.
- * 3. Does NOT overwrite existing records (e.g. Present, Leave, Holiday, Weekly Off).
- * 4. Uses $setOnInsert with findOneAndUpdate to prevent duplicate records per user per day.
+ * 3. Does NOT mark staff absent if targetDate is a Sunday (weekly off) or Holiday under policy.
+ * 4. Does NOT overwrite existing records (e.g. Present, Leave, Holiday, Weekly Off).
+ * 5. Classifies absent staff as 'Absent' with absenceType: 'Uninformed Absence'.
+ * 6. Uses upsert to guarantee idempotency and prevent duplicate records per user per day.
  */
 const markAbsenteesForDate = async (targetDateInput) => {
   try {
@@ -543,19 +547,22 @@ const markAbsenteesForDate = async (targetDateInput) => {
     const activeStaff = await User.find({
       role: { $in: ['Staff', 'Non-Teaching Staff'] },
       isActive: true,
-    }).select('_id employeeId name department');
+    }).select('_id employeeId name department basicSalary');
 
     if (activeStaff.length === 0) return { markedCount: 0 };
 
     // 2. Fetch all existing attendance records for targetDate
     const existingAttendance = await Attendance.find({
       date: { $gte: targetDate, $lt: nextDate },
-    }).select('user status');
+    }).select('user status absenceType remarks');
 
     const existingAttMap = new Map();
     existingAttendance.forEach((r) => {
       existingAttMap.set(r.user.toString(), r);
     });
+
+    // Check if targetDate is Sunday (Weekly Off in institutional policy)
+    const isSunday = targetDate.getUTCDay() === 0;
 
     // 3. Fetch all approved leaves covering targetDate
     const approvedLeaves = await Leave.find({
@@ -573,11 +580,11 @@ const markAbsenteesForDate = async (targetDateInput) => {
 
     for (const staff of activeStaff) {
       const uid = staff._id.toString();
+      const existingRec = existingAttMap.get(uid);
 
       // 1. If staff has approved leave for this date, ensure Leave attendance record
       if (approvedLeaveUserMap.has(uid)) {
         const leave = approvedLeaveUserMap.get(uid);
-        const existingRec = existingAttMap.get(uid);
 
         // Do not downgrade a Present check-in, but ensure any Absent or missing record is 'Leave'
         if (!existingRec || existingRec.status !== 'Present') {
@@ -586,6 +593,7 @@ const markAbsenteesForDate = async (targetDateInput) => {
             {
               $set: {
                 status: 'Leave',
+                absenceType: 'None',
                 remarks: `Approved ${leave.type || 'Leave'}`,
               },
               $setOnInsert: {
@@ -601,12 +609,46 @@ const markAbsenteesForDate = async (targetDateInput) => {
         continue;
       }
 
-      // 2. If already recorded in Attendance (Present, Holiday, Weekly Off, etc.), do not overwrite
-      if (existingAttMap.has(uid)) {
+      // 2. If targetDate is a Sunday (Weekly Off), record Weekly Off instead of Absent
+      if (isSunday) {
+        if (!existingRec) {
+          await Attendance.findOneAndUpdate(
+            { user: staff._id, date: targetDate },
+            {
+              $setOnInsert: {
+                user: staff._id,
+                date: targetDate,
+                status: 'Weekly Off',
+                absenceType: 'None',
+                remarks: 'Scheduled Weekly Off (Sunday)',
+                checkIn: null,
+                checkOut: null,
+              },
+            },
+            { upsert: true, new: true }
+          );
+        }
         continue;
       }
 
-      // 3. If no check-in and no approved leave, mark Absent
+      // 3. If already recorded as Present, Holiday, Weekly Off, or Leave, do not overwrite
+      if (existingRec) {
+        if (['Present', 'Holiday', 'Weekly Off', 'Leave'].includes(existingRec.status)) {
+          continue;
+        }
+        // If already marked Absent, ensure classified as Uninformed Absence
+        if (existingRec.status === 'Absent' && existingRec.absenceType !== 'Uninformed Absence') {
+          await Attendance.findByIdAndUpdate(existingRec._id, {
+            $set: {
+              absenceType: 'Uninformed Absence',
+              remarks: 'Uninformed Absence: Check-in deadline (11:00 AM) passed without check-in or approved leave',
+            },
+          });
+        }
+        continue;
+      }
+
+      // 4. If no check-in and no approved leave on a working day, mark Absent and classify as Uninformed Absence
       await Attendance.findOneAndUpdate(
         { user: staff._id, date: targetDate },
         {
@@ -614,7 +656,8 @@ const markAbsenteesForDate = async (targetDateInput) => {
             user: staff._id,
             date: targetDate,
             status: 'Absent',
-            remarks: 'Auto-marked Absent: Check-in window closed without check-in',
+            absenceType: 'Uninformed Absence',
+            remarks: 'Uninformed Absence: Check-in deadline (11:00 AM) passed without check-in or approved leave',
             checkIn: null,
             checkOut: null,
           },
@@ -658,22 +701,24 @@ const checkIn = async (req, res) => {
       );
     }
 
-    // 2. Check if user is on approved leave today
+    // 2. Check if user has an approved leave covering the current date and time
     const nextDate = new Date(todayUTC);
     nextDate.setUTCDate(nextDate.getUTCDate() + 1);
 
-    const approvedLeave = await Leave.findOne({
+    const approvedLeaves = await Leave.find({
       user: userId,
       status: 'Approved',
       fromDate: { $lt: nextDate },
       toDate: { $gte: todayUTC },
     });
 
-    if (approvedLeave || (existing && existing.status === 'Leave')) {
+    const activeApprovedLeave = approvedLeaves.find((l) => isLeaveCoveringDateTime(l, now));
+
+    if (activeApprovedLeave) {
       return sendError(
         res,
         400,
-        `Cannot check in: You have an approved ${approvedLeave?.type || 'Leave'} for today.`
+        'You are on approved leave today. Check-in is unavailable.'
       );
     }
 
@@ -692,7 +737,7 @@ const checkIn = async (req, res) => {
       return sendError(
         res,
         400,
-        `Check-in window closed at ${config.checkInEndTime}. You have been marked Absent according to attendance rules.`
+        `Check-in window closed at ${config.checkInEndTime}. You have been marked Absent (Uninformed Absence) according to attendance rules.`
       );
     }
 
@@ -702,6 +747,7 @@ const checkIn = async (req, res) => {
       {
         $set: {
           status: 'Present',
+          absenceType: 'None',
           checkIn: now,
           remarks: 'Self Check-In (Biometric alternative)',
         },
@@ -756,32 +802,68 @@ const getTodayAttendance = async (req, res) => {
       date: todayUTC,
     }).populate('user', 'name employeeId designation department');
 
-    const approvedLeave = await Leave.findOne({
+    const approvedLeaves = await Leave.find({
       user: userId,
       status: 'Approved',
       fromDate: { $lt: nextDate },
       toDate: { $gte: todayUTC },
     });
 
+    const activeApprovedLeave = approvedLeaves.find((l) => isLeaveCoveringDateTime(l, now));
+    const todayApprovedLeave = approvedLeaves.length > 0 ? approvedLeaves[0] : null;
+
+    // Check for pending leave (must not block check-in)
+    const pendingLeave = await Leave.findOne({
+      user: userId,
+      status: 'Pending',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: todayUTC },
+    });
+
     let status = 'Pending Check-In';
+    let absenceType = 'None';
     let checkIn = null;
     let remarks = '';
+    const isOnApprovedLeave = Boolean(activeApprovedLeave);
 
     if (attendance) {
       status = attendance.status;
+      absenceType = attendance.absenceType || (attendance.status === 'Absent' ? 'Uninformed Absence' : 'None');
       checkIn = attendance.checkIn;
       remarks = attendance.remarks || '';
-    } else if (approvedLeave) {
+      if (isOnApprovedLeave && status !== 'Present') {
+        status = 'Leave';
+        absenceType = 'None';
+      }
+    } else if (isOnApprovedLeave) {
       status = 'Leave';
-      remarks = `Approved ${approvedLeave.type}`;
+      absenceType = 'None';
+      remarks = `Approved ${activeApprovedLeave.type}`;
+    } else if (todayApprovedLeave && (todayApprovedLeave.totalDays >= 1 || !isWindowClosed)) {
+      status = 'Leave';
+      absenceType = 'None';
+      remarks = `Approved ${todayApprovedLeave.type}`;
     } else if (isWindowClosed) {
       status = 'Absent';
-      remarks = 'Check-in window closed';
+      absenceType = 'Uninformed Absence';
+      remarks = 'Uninformed Absence: Check-in deadline (11:00 AM) passed without check-in or approved leave';
     }
 
+    if (status === 'Absent' && absenceType === 'None') {
+      absenceType = 'Uninformed Absence';
+    }
+
+    // Daily deduction estimate (under existing policy: 25 working days, max salary cap 40000)
+    const applicableSalary = Math.min(req.user.basicSalary || 0, 40000);
+    const dailyDeduction = status === 'Absent' ? Math.round((applicableSalary / 25) * 100) / 100 : 0;
+
     const checkInFormatted = checkIn ? formatTime12Hour(checkIn) : null;
-    const canCheckIn = isWindowOpen && status !== 'Present' && status !== 'Leave';
+    const canCheckIn = isWindowOpen && status !== 'Present' && !isOnApprovedLeave;
     const alreadyCheckedIn = status === 'Present' && checkIn !== null;
+
+    const leaveMessage = isOnApprovedLeave
+      ? 'You are on approved leave today. Check-in is unavailable.'
+      : null;
 
     let windowStatusText = 'Window Open';
     if (isBeforeWindow) {
@@ -795,12 +877,17 @@ const getTodayAttendance = async (req, res) => {
     return sendSuccess(res, 200, 'Today attendance status fetched', {
       date: todayUTC,
       status,
+      absenceType,
+      dailyDeduction,
       checkIn,
       checkInFormatted,
       remarks,
       canCheckIn,
       alreadyCheckedIn,
-      leaveDetails: approvedLeave || null,
+      isOnApprovedLeave,
+      leaveMessage,
+      leaveDetails: activeApprovedLeave || todayApprovedLeave || null,
+      pendingLeaveDetails: pendingLeave || null,
       window: {
         startTime: config.checkInStartTime,
         endTime: config.checkInEndTime,
@@ -920,6 +1007,7 @@ const getDailyStaffAttendance = async (req, res) => {
       const leave = leaveMap.get(uid);
 
       let itemStatus = 'Pending Check-In';
+      let absenceType = 'None';
       let checkIn = null;
       let checkOut = null;
       let remarks = '';
@@ -927,20 +1015,33 @@ const getDailyStaffAttendance = async (req, res) => {
 
       if (att) {
         itemStatus = att.status;
+        absenceType = att.absenceType || (att.status === 'Absent' ? 'Uninformed Absence' : 'None');
         checkIn = att.checkIn;
         checkOut = att.checkOut;
         remarks = att.remarks || '';
         recordId = att._id;
       } else if (leave) {
         itemStatus = 'Leave';
+        absenceType = 'None';
         remarks = `Approved ${leave.type}`;
       } else if (isWindowClosed) {
         itemStatus = 'Absent';
-        remarks = 'Did not check in during attendance window';
+        absenceType = 'Uninformed Absence';
+        remarks = 'Uninformed Absence: Check-in deadline (11:00 AM) passed without check-in or approved leave';
       } else {
         itemStatus = 'Pending Check-In';
+        absenceType = 'None';
         remarks = 'Attendance check-in pending';
       }
+
+      if (itemStatus === 'Absent' && absenceType === 'None') {
+        absenceType = 'Uninformed Absence';
+      }
+
+      // Applicable daily salary deduction under existing policy (25 working days, capped at ₹40,000)
+      const applicableSalary = Math.min(staff.basicSalary || 0, 40000);
+      const dailySalary = Math.round((applicableSalary / 25) * 100) / 100;
+      const dailyDeduction = itemStatus === 'Absent' ? dailySalary : 0;
 
       if (itemStatus === 'Present') presentCount++;
       else if (itemStatus === 'Absent') absentCount++;
@@ -973,6 +1074,8 @@ const getDailyStaffAttendance = async (req, res) => {
         checkInFormatted: checkIn ? formatTime12Hour(checkIn) : '—',
         checkOut,
         status: itemStatus,
+        absenceType,
+        dailyDeduction,
         remarks,
       };
     });
@@ -1032,6 +1135,22 @@ const updateAttendanceConfigEndpoint = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Trigger absence processing for a given date or today (Admin only)
+ * @route   POST /api/attendance/process-absentees
+ * @access  Private (Admin)
+ */
+const processAbsenteesEndpoint = async (req, res) => {
+  try {
+    const { date } = req.body || {};
+    const targetDate = date ? new Date(date) : new Date();
+    const result = await markAbsenteesForDate(targetDate);
+    return sendSuccess(res, 200, `Absence processing completed for date: ${targetDate.toISOString().split('T')[0]}`, result);
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
 module.exports = {
   getMyAttendance,
   getDepartmentAttendance,
@@ -1046,4 +1165,5 @@ module.exports = {
   getAttendanceConfigEndpoint,
   updateAttendanceConfigEndpoint,
   markAbsenteesForDate,
+  processAbsenteesEndpoint,
 };

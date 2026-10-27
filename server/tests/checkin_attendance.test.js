@@ -182,14 +182,16 @@ const runTests = async () => {
     assert(lateRecord !== null && lateRecord.status === 'Absent', 'Staff member is automatically marked "Absent" in MongoDB');
     assert(lateRecord.checkIn === null, 'Absent record has null checkIn time');
 
-    console.log('\n--- 6. APPROVED LEAVE INTEGRATION & PROTECTION ---');
-    // Staff 3 applies for and gets an Approved leave for today
+    console.log('\n--- 6. APPROVED LEAVE INTEGRATION & TIME VALIDATION ---');
+    // Test A: Approved leave covering today
     const testLeave = await Leave.create({
       user: cseStaff3._id,
       department: cseStaff3.department._id,
       type: 'Casual Leave',
       fromDate: todayUTC,
       toDate: todayUTC,
+      startTime: '08:00 AM',
+      endTime: '05:00 PM',
       totalDays: 1,
       reason: 'Medical checkup',
       status: 'Approved',
@@ -197,14 +199,146 @@ const runTests = async () => {
       approvedAt: new Date(),
     });
 
-    // Check-in attempt by staff on approved leave
+    // Attempt check-in by staff on approved leave covering today
     updateAttendanceConfig({ checkInStartTime: '00:00', checkInEndTime: '23:59' });
     const { req: reqLeaveCheckIn, res: resLeaveCheckIn, getResult: getResultLeaveCheckIn } = mockReqRes(cseStaff3);
     await checkIn(reqLeaveCheckIn, resLeaveCheckIn);
     const rLeaveCheckIn = getResultLeaveCheckIn();
 
     assert(rLeaveCheckIn.status === 400, 'Staff on approved leave cannot check in (status 400)');
-    assert(rLeaveCheckIn.data.message.includes('approved'), `Message states user is on approved leave: "${rLeaveCheckIn.data.message}"`);
+    assert(
+      rLeaveCheckIn.data.message === 'You are on approved leave today. Check-in is unavailable.',
+      `Returns exact prompt message: "${rLeaveCheckIn.data.message}"`
+    );
+
+    // Verify Staff 3 getTodayAttendance has isOnApprovedLeave = true and canCheckIn = false
+    const { req: reqTodayLeave, res: resTodayLeave, getResult: getResultTodayLeave } = mockReqRes(cseStaff3);
+    await getTodayAttendance(reqTodayLeave, resTodayLeave);
+    const rTodayLeave = getResultTodayLeave();
+
+    assert(rTodayLeave.data.data.status === 'Leave', 'getTodayAttendance status is "Leave" for approved leave staff');
+    assert(rTodayLeave.data.data.isOnApprovedLeave === true, 'getTodayAttendance marks isOnApprovedLeave = true');
+    assert(rTodayLeave.data.data.canCheckIn === false, 'getTodayAttendance disables canCheckIn for staff on approved leave');
+    assert(
+      rTodayLeave.data.data.leaveMessage === 'You are on approved leave today. Check-in is unavailable.',
+      'getTodayAttendance returns leaveMessage to display on staff dashboard'
+    );
+
+    // Test B: Leave outside current date (e.g., tomorrow)
+    const tomorrowLeave = await Leave.create({
+      user: eceStaff1._id,
+      department: eceStaff1.department._id,
+      type: 'Medical Leave',
+      fromDate: tomorrowUTC,
+      toDate: tomorrowUTC,
+      startTime: '09:00 AM',
+      endTime: '05:00 PM',
+      totalDays: 1,
+      reason: 'Future dentist appointment',
+      status: 'Approved',
+      approvedBy: adminUser._id,
+      approvedAt: new Date(),
+    });
+
+    // Check-in attempt by staff whose approved leave is outside current date
+    const { req: reqFutureLeave, res: resFutureLeave, getResult: getResultFutureLeave } = mockReqRes(eceStaff1);
+    await checkIn(reqFutureLeave, resFutureLeave);
+    const rFutureLeave = getResultFutureLeave();
+
+    assert(rFutureLeave.status === 200 && rFutureLeave.data.success, 'Approved leave outside current date (tomorrow) does NOT block check-in today');
+    assert(rFutureLeave.data.data.status === 'Present', 'Staff with future leave is successfully checked in as "Present" today');
+
+    // Test C: Leave outside current time (e.g. afternoon leave 14:00 - 18:00 checked in during morning)
+    const cseStaff4 = await User.findOne({ email: 'saranya.rajan.cse@bitsathy.ac.in' }).populate('department');
+    const afternoonLeave = await Leave.create({
+      user: cseStaff4._id,
+      department: cseStaff4.department._id,
+      type: 'Casual Leave',
+      fromDate: todayUTC,
+      toDate: todayUTC,
+      startTime: '14:00',
+      endTime: '18:00',
+      totalDays: 0.5,
+      reason: 'Afternoon family function',
+      status: 'Approved',
+      approvedBy: adminUser._id,
+      approvedAt: new Date(),
+    });
+
+    // Evaluated at 09:00 AM (outside the 14:00 - 18:00 window)
+    const morningTime = new Date(todayUTC);
+    morningTime.setUTCHours(3, 30, 0, 0); // 09:00 AM IST
+    const { isLeaveCoveringDateTime } = require('../config/attendance.config');
+    const isCoveredAtMorning = isLeaveCoveringDateTime(afternoonLeave, morningTime);
+    assert(isCoveredAtMorning === false, 'Afternoon leave (14:00 – 18:00) does NOT cover morning time (09:00 AM)');
+
+    // Evaluated at 15:00 (inside 14:00 - 18:00 window)
+    const afternoonTime = new Date(todayUTC);
+    afternoonTime.setUTCHours(9, 30, 0, 0); // 15:00 (3:00 PM IST)
+    const isCoveredAtAfternoon = isLeaveCoveringDateTime(afternoonLeave, afternoonTime);
+    assert(isCoveredAtAfternoon === true, 'Afternoon leave (14:00 – 18:00) DOES cover afternoon time (15:00)');
+
+    // Test D: Pending leave must NOT block check-in
+    const cseStaff5 = await User.findOne({ email: 'vijay.mohan.cse@bitsathy.ac.in' }).populate('department');
+    const pendingLeave = await Leave.create({
+      user: cseStaff5._id,
+      department: cseStaff5.department._id,
+      type: 'Casual Leave',
+      fromDate: todayUTC,
+      toDate: todayUTC,
+      totalDays: 1,
+      reason: 'Awaiting approval',
+      status: 'Pending',
+    });
+
+    const { req: reqPendingCheckIn, res: resPendingCheckIn, getResult: getResultPendingCheckIn } = mockReqRes(cseStaff5);
+    await checkIn(reqPendingCheckIn, resPendingCheckIn);
+    const rPendingCheckIn = getResultPendingCheckIn();
+
+    assert(rPendingCheckIn.status === 200, 'Pending leave does NOT block check-in (status 200)');
+    assert(rPendingCheckIn.data.data.status === 'Present', 'Staff with pending leave is recorded as "Present" upon check-in');
+
+    // Test E: Rejected leave must NOT block check-in
+    const cseStaff6 = await User.findOne({ email: 'lakshmi.priya.cse@bitsathy.ac.in' }).populate('department');
+    const rejectedLeave = await Leave.create({
+      user: cseStaff6._id,
+      department: cseStaff6.department._id,
+      type: 'Casual Leave',
+      fromDate: todayUTC,
+      toDate: todayUTC,
+      totalDays: 1,
+      reason: 'Personal',
+      status: 'Rejected',
+      approvedBy: adminUser._id,
+      approvedAt: new Date(),
+    });
+
+    const { req: reqRejectedCheckIn, res: resRejectedCheckIn, getResult: getResultRejectedCheckIn } = mockReqRes(cseStaff6);
+    await checkIn(reqRejectedCheckIn, resRejectedCheckIn);
+    const rRejectedCheckIn = getResultRejectedCheckIn();
+
+    assert(rRejectedCheckIn.status === 200, 'Rejected leave does NOT block check-in (status 200)');
+    assert(rRejectedCheckIn.data.data.status === 'Present', 'Staff with rejected leave is recorded as "Present" upon check-in');
+
+    // Test F: Cancelled leave must NOT block check-in
+    const cseStaff7 = await User.findOne({ email: 'dinesh.raj.cse@bitsathy.ac.in' }).populate('department');
+    const cancelledLeave = await Leave.create({
+      user: cseStaff7._id,
+      department: cseStaff7.department._id,
+      type: 'Casual Leave',
+      fromDate: todayUTC,
+      toDate: todayUTC,
+      totalDays: 1,
+      reason: 'Plans changed',
+      status: 'Cancelled',
+    });
+
+    const { req: reqCancelledCheckIn, res: resCancelledCheckIn, getResult: getResultCancelledCheckIn } = mockReqRes(cseStaff7);
+    await checkIn(reqCancelledCheckIn, resCancelledCheckIn);
+    const rCancelledCheckIn = getResultCancelledCheckIn();
+
+    assert(rCancelledCheckIn.status === 200, 'Cancelled leave does NOT block check-in (status 200)');
+    assert(rCancelledCheckIn.data.data.status === 'Present', 'Staff with cancelled leave is recorded as "Present" upon check-in');
 
     // Window closes: run auto-absence process
     updateAttendanceConfig({ checkInStartTime: '00:00', checkInEndTime: '00:01' });
@@ -325,7 +459,18 @@ const runTests = async () => {
 
     // Clean up test records
     await Attendance.deleteMany({ date: { $gte: todayUTC, $lt: tomorrowUTC } });
-    await Leave.deleteMany({ _id: testLeave._id });
+    await Leave.deleteMany({
+      _id: {
+        $in: [
+          testLeave._id,
+          tomorrowLeave._id,
+          afternoonLeave._id,
+          pendingLeave._id,
+          rejectedLeave._id,
+          cancelledLeave._id,
+        ],
+      },
+    });
     updateAttendanceConfig(originalConfig);
 
     console.log(`\n======================================================`);

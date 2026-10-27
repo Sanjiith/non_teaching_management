@@ -185,7 +185,16 @@ const HODAttendancePage = () => {
                       <td className="text-secondary font-mono text-xs whitespace-nowrap">
                         {r.dateDisplay || dateStr}
                       </td>
-                      <td><StatusBadge status={r.status} /></td>
+                      <td>
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <StatusBadge status={r.status} />
+                          {r.status === 'Absent' && (r.absenceType === 'Uninformed Absence' || r.remarks?.includes('Uninformed')) && (
+                            <span className="badge-error text-[11px] py-0 px-1.5 font-medium">
+                              Uninformed Absence
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="text-secondary text-sm">
                         <div className="flex items-center gap-xs flex-wrap">
                           <span>{r.remarksDisplay || r.remarks || '—'}</span>

@@ -180,7 +180,7 @@ const StaffPayrollPage = () => {
               label="Absent Days"
               value={selectedPayroll.absentDays}
               icon="person_off"
-              sub="Unauthorized absence"
+              sub={selectedPayroll.uninformedAbsentDays > 0 ? `${selectedPayroll.uninformedAbsentDays} Uninformed` : "Unauthorized absence"}
               valueColor="text-error"
             />
           </div>
@@ -250,7 +250,7 @@ const StaffPayrollPage = () => {
                 <div>
                   <p className="font-label-md text-label-md text-secondary uppercase tracking-wide mb-xs">Deductions</p>
                   <BreakdownRow
-                    label={`Absence Deduction (${selectedPayroll.absentDays} day${selectedPayroll.absentDays !== 1 ? 's' : ''})`}
+                    label={`Absence Deduction (${selectedPayroll.absentDays} day${selectedPayroll.absentDays !== 1 ? 's' : ''}${selectedPayroll.uninformedAbsentDays > 0 ? ` • ${selectedPayroll.uninformedAbsentDays} Uninformed` : ''})`}
                     value={selectedPayroll.absentDays > 0 ? `-${fmtINR(selectedPayroll.absenceDeduction)}` : fmtINR(0)}
                     deduction={selectedPayroll.absentDays > 0}
                   />

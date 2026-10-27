@@ -117,6 +117,7 @@ const HODLeavePage = () => {
                   <th>Dates</th>
                   <th>Days</th>
                   <th>Reason</th>
+                  <th>Substitute</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -126,6 +127,7 @@ const HODLeavePage = () => {
                   const fromStr = new Date(l.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
                   const toStr = new Date(l.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
                   const dateStr = fromStr === toStr ? fromStr : `${fromStr} – ${toStr}`;
+                  const isAwaitingSub = l.requiresSubstitute && l.substituteStatus !== 'Accepted';
 
                   return (
                     <tr key={l._id}>
@@ -141,24 +143,64 @@ const HODLeavePage = () => {
                       <td className="text-secondary text-sm max-w-xs truncate" title={l.reason}>
                         {l.reason}
                       </td>
+                      <td>
+                        {l.requiresSubstitute ? (
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-on-surface">
+                              {l.substitute?.name || 'Assigned'}
+                            </p>
+                            <StatusBadge status={l.substituteStatus} />
+                          </div>
+                        ) : (
+                          <span className="text-outline text-xs">Not required</span>
+                        )}
+                      </td>
                       <td><StatusBadge status={l.status} /></td>
                       <td>
                         {l.status === 'Pending' && (
-                          <div className="flex gap-xs">
-                            <button
-                              onClick={() => handleApprove(l._id)}
-                              disabled={processingId === l._id}
-                              className="btn-primary text-xs py-xs px-sm"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleReject(l._id)}
-                              disabled={processingId === l._id}
-                              className="btn-ghost text-xs py-xs px-sm text-error hover:bg-error-container/20"
-                            >
-                              Reject
-                            </button>
+                          <div>
+                            {isAwaitingSub ? (
+                              <div className="space-y-1">
+                                <span className={`text-[11px] font-medium block ${l.substituteStatus === 'Rejected' ? 'text-error' : 'text-amber-600'}`}>
+                                  {l.substituteStatus === 'Rejected'
+                                    ? 'Substitute declined'
+                                    : 'Awaiting substitute'}
+                                </span>
+                                <div className="flex gap-xs opacity-50 cursor-not-allowed">
+                                  <button
+                                    disabled
+                                    title="Disabled: Substitute must accept before HOD can approve"
+                                    className="btn-primary text-xs py-xs px-sm pointer-events-none"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    disabled
+                                    title="Disabled: Substitute must accept before HOD can reject"
+                                    className="btn-ghost text-xs py-xs px-sm text-error pointer-events-none"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex gap-xs">
+                                <button
+                                  onClick={() => handleApprove(l._id)}
+                                  disabled={processingId === l._id}
+                                  className="btn-primary text-xs py-xs px-sm"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => handleReject(l._id)}
+                                  disabled={processingId === l._id}
+                                  className="btn-ghost text-xs py-xs px-sm text-error hover:bg-error-container/20"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                         {l.status !== 'Pending' && (

@@ -84,6 +84,29 @@ const leaveSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    substitute: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    substituteStatus: {
+      type: String,
+      enum: ['None', 'Pending', 'Accepted', 'Rejected'],
+      default: 'None',
+    },
+    substituteRemarks: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    substituteActionAt: {
+      type: Date,
+      default: null,
+    },
+    requiresSubstitute: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

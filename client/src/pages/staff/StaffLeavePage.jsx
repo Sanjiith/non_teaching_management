@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
-import { getMyLeaves, applyLeave, cancelLeave } from '../../services/leave.service';
+import {
+  getMyLeaves,
+  applyLeave,
+  cancelLeave,
+  checkSubstituteRequirement,
+  getEligibleSubstitutes,
+  getMySubstituteRequests,
+  respondToSubstituteRequest,
+  reassignSubstitute,
+} from '../../services/leave.service';
 import { exportCSV, getLeaveBalanceWarning } from '../../utils/exportCSV';
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
@@ -87,6 +96,20 @@ const StaffLeavePage = () => {
   const [balances, setBalances] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Substitute state
+  const [subCheck, setSubCheck] = useState({ requiresSubstitute: false, datesExceedingLimit: [] });
+  const [eligibleSubs, setEligibleSubs] = useState([]);
+  const [checkingSub, setCheckingSub] = useState(false);
+  const [subRequests, setSubRequests] = useState([]);
+  const [respondingId, setRespondingId] = useState(null);
+
+  // Reassignment modal state
+  const [reassignLeave, setReassignLeave] = useState(null);
+  const [reassignSubId, setReassignSubId] = useState('');
+  const [reassignSubsList, setReassignSubsList] = useState([]);
+  const [loadingReassignSubs, setLoadingReassignSubs] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+
   const [form, setForm] = useState({
     type: 'Casual Leave',
     startDate: '',
@@ -94,6 +117,7 @@ const StaffLeavePage = () => {
     endDate: '',
     endTime: '05:00 PM',
     reason: '',
+    substitute: '',
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -113,14 +137,59 @@ const StaffLeavePage = () => {
     }
   }, []);
 
+  const fetchSubRequests = useCallback(async () => {
+    try {
+      const data = await getMySubstituteRequests();
+      setSubRequests(data.requests || []);
+    } catch (err) {
+      console.error('Error fetching substitute requests:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchLeaves();
-  }, [fetchLeaves]);
+    fetchSubRequests();
+  }, [fetchLeaves, fetchSubRequests]);
+
+  // Check substitute requirement and eligible substitutes dynamically when dates change
+  useEffect(() => {
+    let isCurrent = true;
+    const evaluateSubstituteRequirement = async () => {
+      if (!form.startDate || !form.endDate || form.endDate < form.startDate) {
+        setSubCheck({ requiresSubstitute: false, datesExceedingLimit: [] });
+        setEligibleSubs([]);
+        return;
+      }
+
+      setCheckingSub(true);
+      try {
+        const [reqData, eligibleData] = await Promise.all([
+          checkSubstituteRequirement({ startDate: form.startDate, endDate: form.endDate }),
+          getEligibleSubstitutes({ startDate: form.startDate, endDate: form.endDate }),
+        ]);
+
+        if (isCurrent) {
+          setSubCheck(reqData || { requiresSubstitute: false, datesExceedingLimit: [] });
+          setEligibleSubs(eligibleData?.substitutes || []);
+          if (!reqData?.requiresSubstitute) {
+            setForm((prev) => ({ ...prev, substitute: '' }));
+          }
+        }
+      } catch (err) {
+        console.error('Error checking substitute requirements:', err);
+      } finally {
+        if (isCurrent) setCheckingSub(false);
+      }
+    };
+
+    evaluateSubstituteRequirement();
+    return () => { isCurrent = false; };
+  }, [form.startDate, form.endDate]);
 
   // ─── Frontend validation ────────────────────────────────────────────────
 
   const validateForm = () => {
-    const { startDate, endDate, startTime, endTime, reason } = form;
+    const { startDate, endDate, startTime, endTime, reason, substitute } = form;
 
     if (!startDate) return 'Start date is required.';
     if (!endDate)   return 'End date is required.';
@@ -153,6 +222,11 @@ const StaffLeavePage = () => {
       }
     }
 
+    // Substitute validation
+    if (subCheck.requiresSubstitute && !substitute) {
+      return 'A substitute must be selected before submitting this leave request.';
+    }
+
     return null; // no error
   };
 
@@ -169,7 +243,10 @@ const StaffLeavePage = () => {
 
     setSubmitting(true);
     try {
-      await applyLeave(form);
+      await applyLeave({
+        ...form,
+        substitute: form.substitute || undefined,
+      });
       setFormSuccess('Leave application submitted successfully!');
       setForm({
         type: 'Casual Leave',
@@ -178,8 +255,11 @@ const StaffLeavePage = () => {
         endDate: '',
         endTime: '05:00 PM',
         reason: '',
+        substitute: '',
       });
+      setSubCheck({ requiresSubstitute: false, datesExceedingLimit: [] });
       fetchLeaves();
+      fetchSubRequests();
     } catch (err) {
       setFormError(err.response?.data?.message || err.message || 'Failed to submit leave.');
     } finally {
@@ -194,6 +274,57 @@ const StaffLeavePage = () => {
       fetchLeaves();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to cancel leave.');
+    }
+  };
+
+  const handleRespondSubstitute = async (leaveId, action) => {
+    let remarks = '';
+    if (action === 'reject') {
+      const input = window.prompt('Optional remarks for declining substitute duty:');
+      if (input === null) return;
+      remarks = input;
+    }
+    setRespondingId(leaveId);
+    try {
+      await respondToSubstituteRequest(leaveId, action, remarks);
+      fetchSubRequests();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to respond to substitute request.');
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const handleOpenReassignModal = async (leave) => {
+    setReassignLeave(leave);
+    setReassignSubId('');
+    setLoadingReassignSubs(true);
+    try {
+      const start = new Date(leave.fromDate).toISOString().split('T')[0];
+      const end = new Date(leave.toDate).toISOString().split('T')[0];
+      const data = await getEligibleSubstitutes({ startDate: start, endDate: end });
+      setReassignSubsList(data.substitutes || []);
+    } catch (err) {
+      console.error('Error fetching substitutes for reassignment:', err);
+    } finally {
+      setLoadingReassignSubs(false);
+    }
+  };
+
+  const handleReassignSubmit = async () => {
+    if (!reassignSubId) {
+      alert('Please select an eligible substitute.');
+      return;
+    }
+    setReassigning(true);
+    try {
+      await reassignSubstitute(reassignLeave._id, reassignSubId);
+      setReassignLeave(null);
+      fetchLeaves();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to reassign substitute.');
+    } finally {
+      setReassigning(false);
     }
   };
 
@@ -230,7 +361,7 @@ const StaffLeavePage = () => {
       <div className="page-header">
         <h2 className="font-headline-md text-headline-md text-on-surface">Leave Management</h2>
         <p className="font-body-sm text-body-sm text-secondary mt-xs">
-          Submit new leave requests and track your available balance
+          Submit new leave requests, coordinate substitutes, and track your available balance
         </p>
       </div>
 
@@ -267,6 +398,85 @@ const StaffLeavePage = () => {
           );
         })}
       </div>
+
+      {/* Substitute Requests Assigned to You */}
+      {subRequests.length > 0 && (
+        <div className="bit-card border border-primary/20 bg-primary/5">
+          <div className="flex items-center justify-between mb-sm">
+            <h3 className="font-title-md text-title-md text-on-surface flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">person_check</span>
+              Substitute Requests Assigned to You
+            </h3>
+            <span className="badge-warning text-xs font-semibold px-2 py-0.5 rounded-full">
+              {subRequests.filter((r) => r.substituteStatus === 'Pending').length} Pending Response
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="bit-table">
+              <thead>
+                <tr>
+                  <th>Requesting Staff</th>
+                  <th>Department</th>
+                  <th>Dates</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subRequests.map((req) => {
+                  const fromStr = new Date(req.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                  const toStr = new Date(req.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                  const dateStr = fromStr === toStr ? fromStr : `${fromStr} – ${toStr}`;
+
+                  return (
+                    <tr key={req._id}>
+                      <td className="font-medium">
+                        <div>
+                          <p>{req.user?.name}</p>
+                          <span className="font-label-sm text-label-sm text-outline">{req.user?.employeeId}</span>
+                        </div>
+                      </td>
+                      <td className="text-secondary text-sm">{req.department?.name || req.user?.department?.name || '—'}</td>
+                      <td className="text-secondary font-mono text-xs">{dateStr}</td>
+                      <td className="text-secondary text-sm max-w-xs truncate" title={req.reason}>
+                        {req.reason}
+                      </td>
+                      <td>
+                        <StatusBadge status={req.substituteStatus} />
+                      </td>
+                      <td>
+                        {req.substituteStatus === 'Pending' && req.status === 'Pending' ? (
+                          <div className="flex gap-xs">
+                            <button
+                              onClick={() => handleRespondSubstitute(req._id, 'accept')}
+                              disabled={respondingId === req._id}
+                              className="btn-primary text-xs py-xs px-sm"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleRespondSubstitute(req._id, 'reject')}
+                              disabled={respondingId === req._id}
+                              className="btn-ghost text-xs py-xs px-sm text-error hover:bg-error-container/20"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-outline">
+                            {req.substituteRemarks || req.substituteStatus}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Apply Form & History Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-md">
@@ -359,6 +569,52 @@ const StaffLeavePage = () => {
                 />
               </div>
 
+              {/* ── Substitute Requirement Section ── */}
+              {subCheck.requiresSubstitute && (
+                <div className="p-sm bg-amber-50 border border-amber-200 rounded text-body-sm text-amber-900 space-y-xs">
+                  <div className="flex items-start gap-2">
+                    <span className="material-symbols-outlined text-amber-600 text-lg flex-shrink-0 mt-0.5">group_work</span>
+                    <div>
+                      <p className="font-semibold text-xs uppercase tracking-wide">Substitute Required</p>
+                      <p className="text-xs text-amber-800 mt-0.5">
+                        2 staff members in your department are already on approved leave for date(s):{' '}
+                        <strong>{subCheck.datesExceedingLimit.join(', ')}</strong>. Please select an eligible substitute.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-xs">
+                    <label className="font-label-sm text-label-sm text-on-surface uppercase block mb-xs">
+                      Select Substitute <span className="text-red-500">*</span>
+                    </label>
+                    {checkingSub ? (
+                      <div className="text-xs text-secondary flex items-center gap-2 py-1">
+                        <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Finding eligible substitutes...
+                      </div>
+                    ) : eligibleSubs.length === 0 ? (
+                      <p className="text-xs text-red-600 font-medium">
+                        No eligible substitutes currently available for these dates.
+                      </p>
+                    ) : (
+                      <select
+                        value={form.substitute}
+                        onChange={(e) => setForm({ ...form, substitute: e.target.value })}
+                        className="bit-input text-xs"
+                        required
+                      >
+                        <option value="">-- Choose an eligible substitute --</option>
+                        {eligibleSubs.map((s) => (
+                          <option key={s._id} value={s._id}>
+                            {s.name} ({s.employeeId || s.staffId}) · {s.department?.name || 'Staff'}{s.designation ? ` (${s.designation})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {formError && (
                 <div className="p-sm bg-error-container text-on-error-container rounded text-body-sm flex items-start gap-2">
                   <span className="material-symbols-outlined text-base flex-shrink-0 mt-0.5">error</span>
@@ -375,7 +631,7 @@ const StaffLeavePage = () => {
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || (subCheck.requiresSubstitute && !form.substitute)}
                 className="btn-primary w-full justify-center mt-sm"
               >
                 {submitting ? 'Submitting...' : 'Submit Application'}
@@ -405,6 +661,7 @@ const StaffLeavePage = () => {
                       <th>Dates</th>
                       <th>Days</th>
                       <th>Reason</th>
+                      <th>Substitute</th>
                       <th>Status</th>
                       <th>Action</th>
                     </tr>
@@ -423,6 +680,26 @@ const StaffLeavePage = () => {
                           <td>{l.totalDays}</td>
                           <td className="text-secondary text-sm max-w-xs truncate" title={l.reason}>
                             {l.reason}
+                          </td>
+                          <td>
+                            {l.requiresSubstitute ? (
+                              <div className="space-y-1">
+                                <p className="text-xs font-medium text-on-surface">
+                                  {l.substitute?.name || 'Assigned'}
+                                </p>
+                                <StatusBadge status={l.substituteStatus} />
+                                {l.substituteStatus === 'Rejected' && l.status === 'Pending' && (
+                                  <button
+                                    onClick={() => handleOpenReassignModal(l)}
+                                    className="btn-primary text-[11px] py-0.5 px-2 mt-1 block"
+                                  >
+                                    Change Substitute
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-outline text-xs">Not required</span>
+                            )}
                           </td>
                           <td><StatusBadge status={l.status} /></td>
                           <td>
@@ -445,6 +722,77 @@ const StaffLeavePage = () => {
           </div>
         </div>
       </div>
+
+      {/* Reassign Substitute Modal */}
+      {reassignLeave && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-md">
+          <div className="bit-card max-w-md w-full bg-surface shadow-xl p-lg rounded-xl border border-outline/20">
+            <div className="flex items-center justify-between mb-md">
+              <h3 className="font-title-md text-title-md text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">swap_horiz</span>
+                Select New Substitute
+              </h3>
+              <button
+                onClick={() => setReassignLeave(null)}
+                className="text-secondary hover:text-on-surface"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <p className="text-body-sm text-secondary mb-md">
+              The previous substitute declined your request. Please select another eligible substitute for your leave (
+              {new Date(reassignLeave.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} –{' '}
+              {new Date(reassignLeave.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}).
+            </p>
+
+            <div className="space-y-sm mb-lg">
+              <label className="font-label-sm text-label-sm text-on-surface uppercase block">
+                Eligible Non-Teaching Staff
+              </label>
+              {loadingReassignSubs ? (
+                <div className="text-xs text-secondary flex items-center gap-2 py-2">
+                  <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  Loading eligible substitutes...
+                </div>
+              ) : reassignSubsList.length === 0 ? (
+                <p className="text-xs text-red-600 font-medium">
+                  No eligible substitutes currently available for these dates.
+                </p>
+              ) : (
+                <select
+                  value={reassignSubId}
+                  onChange={(e) => setReassignSubId(e.target.value)}
+                  className="bit-input text-xs w-full"
+                >
+                  <option value="">-- Choose an eligible substitute --</option>
+                  {reassignSubsList.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.name} ({s.employeeId || s.staffId}) · {s.department?.name || 'Staff'}{s.designation ? ` (${s.designation})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-sm">
+              <button
+                onClick={() => setReassignLeave(null)}
+                className="btn-ghost text-xs py-xs px-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReassignSubmit}
+                disabled={reassigning || !reassignSubId}
+                className="btn-primary text-xs py-xs px-md"
+              >
+                {reassigning ? 'Sending...' : 'Confirm & Send Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

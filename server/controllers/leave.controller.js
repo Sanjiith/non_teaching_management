@@ -90,6 +90,171 @@ const leavesOverlap = (newStart, newEnd, newStartTime, newEndTime, existStart, e
 };
 
 /**
+ * For a given department and date range, checks each calendar date to determine
+ * if the number of distinct staff members on approved leave is >= 2.
+ * Returns { requiresSubstitute: boolean, datesExceedingLimit: string[], maxApprovedOnAnyDate: number, dateCounts: Record<string, number> }
+ */
+const checkDepartmentLeaveLimit = async (departmentId, startDate, endDate, excludeUserId = null, excludeLeaveId = null) => {
+  if (!departmentId) {
+    return { requiresSubstitute: false, datesExceedingLimit: [], maxApprovedOnAnyDate: 0, dateCounts: {} };
+  }
+
+  const start = normalizeDateToUTC(startDate);
+  const end = normalizeDateToUTC(endDate);
+
+  const query = {
+    department: departmentId,
+    status: 'Approved',
+    fromDate: { $lte: end },
+    toDate: { $gte: start },
+  };
+
+  if (excludeUserId) {
+    query.user = { $ne: excludeUserId };
+  }
+  if (excludeLeaveId) {
+    query._id = { $ne: excludeLeaveId };
+  }
+
+  const approvedLeaves = await Leave.find(query).select('user fromDate toDate');
+
+  const dateCounts = {};
+  const datesExceedingLimit = [];
+  let maxApprovedOnAnyDate = 0;
+
+  const current = new Date(start);
+  while (current <= end) {
+    const curTime = current.getTime();
+    const dateStr = current.toISOString().split('T')[0];
+
+    const usersOnLeave = new Set();
+    for (const leave of approvedLeaves) {
+      const lStart = normalizeDateToUTC(leave.fromDate).getTime();
+      const lEnd = normalizeDateToUTC(leave.toDate).getTime();
+      if (curTime >= lStart && curTime <= lEnd) {
+        usersOnLeave.add(leave.user.toString());
+      }
+    }
+
+    const count = usersOnLeave.size;
+    dateCounts[dateStr] = count;
+    if (count > maxApprovedOnAnyDate) {
+      maxApprovedOnAnyDate = count;
+    }
+
+    if (count >= 2) {
+      datesExceedingLimit.push(dateStr);
+    }
+
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return {
+    requiresSubstitute: datesExceedingLimit.length > 0,
+    datesExceedingLimit,
+    maxApprovedOnAnyDate,
+    dateCounts,
+  };
+};
+
+/**
+ * @desc    Check whether a substitute is required for given dates in user's department
+ * @route   GET /api/leaves/check-substitute-requirement
+ * @access  Private
+ */
+const checkSubstituteRequirement = async (req, res) => {
+  try {
+    const { startDate, endDate, fromDate, toDate, department } = req.query;
+    const start = startDate || fromDate;
+    const end = endDate || toDate;
+
+    if (!start || !end) {
+      return sendError(res, 400, 'Start date and end date are required.');
+    }
+
+    const deptId = department || req.user.department?._id || req.user.department;
+    if (!deptId) {
+      return sendSuccess(res, 200, 'Department limit checked', {
+        requiresSubstitute: false,
+        datesExceedingLimit: [],
+        maxApprovedOnAnyDate: 0,
+        dateCounts: {},
+      });
+    }
+
+    const result = await checkDepartmentLeaveLimit(deptId, start, end, req.user._id);
+
+    return sendSuccess(res, 200, 'Department limit checked', result);
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Get eligible non-teaching staff who can serve as a substitute for given dates
+ * @route   GET /api/leaves/eligible-substitutes
+ * @access  Private
+ */
+const getEligibleSubstitutes = async (req, res) => {
+  try {
+    const { startDate, endDate, fromDate, toDate } = req.query;
+    const start = startDate || fromDate;
+    const end = endDate || toDate;
+
+    if (!start || !end) {
+      return sendError(res, 400, 'Start date and end date are required.');
+    }
+
+    const startUTC = normalizeDateToUTC(start);
+    const endUTC = normalizeDateToUTC(end);
+    const applicantId = req.user._id;
+
+    // 1. Find all active non-teaching staff members (any department), excluding applicant
+    const candidateStaff = await User.find({
+      _id: { $ne: applicantId },
+      isActive: true,
+      role: { $in: ['Staff', 'Non-Teaching Staff'] },
+    })
+      .select('name employeeId staffId designation department email')
+      .populate('department', 'name code')
+      .sort({ name: 1 });
+
+    const candidateIds = candidateStaff.map((u) => u._id);
+
+    // 2. Find candidates who have Approved leave overlapping [startUTC, endUTC]
+    const approvedLeaves = await Leave.find({
+      user: { $in: candidateIds },
+      status: 'Approved',
+      fromDate: { $lte: endUTC },
+      toDate: { $gte: startUTC },
+    }).select('user');
+
+    const unavailableUserIds = new Set(approvedLeaves.map((l) => l.user.toString()));
+
+    // 3. Find candidates who already have Accepted substitute duty overlapping [startUTC, endUTC]
+    const activeSubAssignments = await Leave.find({
+      substitute: { $in: candidateIds },
+      substituteStatus: 'Accepted',
+      status: { $in: ['Pending', 'Approved'] },
+      fromDate: { $lte: endUTC },
+      toDate: { $gte: startUTC },
+    }).select('substitute');
+
+    activeSubAssignments.forEach((l) => unavailableUserIds.add(l.substitute.toString()));
+
+    // 4. Filter to eligible candidates
+    const eligible = candidateStaff.filter((u) => !unavailableUserIds.has(u._id.toString()));
+
+    return sendSuccess(res, 200, 'Eligible substitutes fetched', {
+      count: eligible.length,
+      substitutes: eligible,
+    });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
  * @desc    Apply for leave
  * @route   POST /api/leaves
  * @access  Private (Staff)
@@ -196,6 +361,80 @@ const applyLeave = async (req, res) => {
       );
     }
 
+    // ── CHECK 2-STAFF DEPARTMENT LEAVE LIMIT ──────────────────────────────
+    const deptId = user.department?._id || user.department;
+    const limitCheck = await checkDepartmentLeaveLimit(deptId, newFromDate, newToDate, userId);
+
+    let assignedSubstituteId = null;
+    let initialSubstituteStatus = 'None';
+    let requiresSubstitute = limitCheck.requiresSubstitute;
+    let selectedSubstituteUser = null;
+
+    if (requiresSubstitute) {
+      const selectedSubId = req.body.substitute;
+      if (!selectedSubId) {
+        return sendError(
+          res,
+          400,
+          `A substitute is required. 2 staff members in your department are already on approved leave for date(s): ${limitCheck.datesExceedingLimit.join(', ')}. Please select an eligible substitute.`
+        );
+      }
+
+      if (selectedSubId.toString() === userId.toString()) {
+        return sendError(res, 400, 'You cannot select yourself as a substitute.');
+      }
+
+      selectedSubstituteUser = await User.findById(selectedSubId);
+      if (!selectedSubstituteUser || !selectedSubstituteUser.isActive) {
+        return sendError(res, 400, 'Selected substitute not found or inactive.');
+      }
+
+      if (!['Staff', 'Non-Teaching Staff'].includes(selectedSubstituteUser.role)) {
+        return sendError(res, 400, 'Substitute must be a non-teaching staff member.');
+      }
+
+      // Check substitute's availability
+      const subOnLeave = await Leave.findOne({
+        user: selectedSubstituteUser._id,
+        status: 'Approved',
+        fromDate: { $lte: newToDate },
+        toDate: { $gte: newFromDate },
+      });
+      if (subOnLeave) {
+        return sendError(
+          res,
+          400,
+          `${selectedSubstituteUser.name} is on approved leave during this period and cannot serve as a substitute.`
+        );
+      }
+
+      const subBusy = await Leave.findOne({
+        substitute: selectedSubstituteUser._id,
+        substituteStatus: 'Accepted',
+        status: { $in: ['Pending', 'Approved'] },
+        fromDate: { $lte: newToDate },
+        toDate: { $gte: newFromDate },
+      });
+      if (subBusy) {
+        return sendError(
+          res,
+          400,
+          `${selectedSubstituteUser.name} is already committed as a substitute for another staff member during this period.`
+        );
+      }
+
+      assignedSubstituteId = selectedSubstituteUser._id;
+      initialSubstituteStatus = 'Pending';
+    } else if (req.body.substitute) {
+      // Optional substitute provided by applicant
+      const subUser = await User.findById(req.body.substitute);
+      if (subUser && subUser.isActive && subUser._id.toString() !== userId.toString()) {
+        selectedSubstituteUser = subUser;
+        assignedSubstituteId = subUser._id;
+        initialSubstituteStatus = 'Pending';
+      }
+    }
+
     // Reserve balance temporarily until approval/rejection
     if (!user.leaveBalances) {
       user.leaveBalances = {};
@@ -218,20 +457,42 @@ const applyLeave = async (req, res) => {
       totalDays,
       reason: reason.trim(),
       status: 'Pending',
+      requiresSubstitute,
+      substitute: assignedSubstituteId,
+      substituteStatus: initialSubstituteStatus,
     });
 
     const populatedLeave = await Leave.findById(leave._id)
       .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
       .populate('department', 'name code');
+
+    // Notify substitute if assigned
+    if (assignedSubstituteId) {
+      const fromDateStr = newFromDate.toISOString().split('T')[0];
+      const toDateStr = newToDate.toISOString().split('T')[0];
+      const dateRangeStr = fromDateStr === toDateStr ? fromDateStr : `${fromDateStr} to ${toDateStr}`;
+      await notificationService.createNotification({
+        user: assignedSubstituteId,
+        title: 'Substitute Request Received',
+        message: `${user.name} has requested you as a substitute for leave from ${dateRangeStr}.`,
+        type: 'info',
+        link: '/staff/leave',
+      });
+    }
 
     // Notify HOD
     if (user.department) {
       const deptId = user.department._id || user.department;
+      const subNote = requiresSubstitute
+        ? ` (Substitute requested: ${selectedSubstituteUser?.name || 'Assigned'}, awaiting acceptance)`
+        : '';
       await notificationService.notifyHOD({
         departmentId: deptId,
         title: 'New Leave Request',
-        message: `${user.name} applied for ${totalDays} day(s) of ${actualType}.`,
-        type: 'info'
+        message: `${user.name} applied for ${totalDays} day(s) of ${actualType}${subNote}.`,
+        type: 'info',
+        link: '/hod/leave',
       });
     }
 
@@ -259,6 +520,7 @@ const getMyLeaves = async (req, res) => {
 
     let query = Leave.find(filter)
       .populate('approvedBy', 'name employeeId')
+      .populate('substitute', 'name employeeId staffId designation department')
       .sort({ createdAt: -1 });
 
     if (limit) query = query.limit(parseInt(limit, 10));
@@ -313,6 +575,7 @@ const getDepartmentLeaves = async (req, res) => {
 
     let query = Leave.find(filter)
       .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
       .populate('approvedBy', 'name employeeId')
       .sort({ createdAt: -1 });
 
@@ -365,6 +628,7 @@ const getAllLeaves = async (req, res) => {
 
     let query = Leave.find(filter)
       .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
       .populate('department', 'name code')
       .populate('approvedBy', 'name employeeId')
       .sort({ createdAt: -1 });
@@ -427,6 +691,34 @@ const approveLeave = async (req, res) => {
       return sendError(res, 400, `Cannot approve leave with status '${leave.status}'.`);
     }
 
+    // ── REQUIREMENT 6 & 7: Revalidate department leave count & substitute requirement ──
+    const limitCheck = await checkDepartmentLeaveLimit(
+      leave.department?._id || leave.department,
+      leave.fromDate,
+      leave.toDate,
+      leave.user,
+      leave._id
+    );
+
+    const requiresSub = leave.requiresSubstitute || limitCheck.requiresSubstitute;
+
+    if (requiresSub) {
+      if (!leave.substitute) {
+        return sendError(
+          res,
+          400,
+          `Cannot approve leave request. 2 staff members in this department are already on approved leave for date(s): ${limitCheck.datesExceedingLimit.join(', ')}. A substitute must be assigned and accepted before approval.`
+        );
+      }
+      if (leave.substituteStatus !== 'Accepted') {
+        return sendError(
+          res,
+          400,
+          `Cannot approve leave request. The selected substitute has not accepted the request (Current substitute status: ${leave.substituteStatus}).`
+        );
+      }
+    }
+
     const user = await User.findById(leave.user);
     if (!user) {
       return sendError(res, 404, 'User associated with leave not found.');
@@ -486,6 +778,7 @@ const approveLeave = async (req, res) => {
 
     const populatedLeave = await Leave.findById(leave._id)
       .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
       .populate('approvedBy', 'name employeeId');
 
     // Notify Staff
@@ -538,6 +831,15 @@ const rejectLeave = async (req, res) => {
       return sendError(res, 400, `Cannot reject leave with status '${leave.status}'.`);
     }
 
+    // ── REQUIREMENT 6: The HOD must not be allowed to approve or reject the leave until the selected substitute accepts the request ──
+    if (leave.requiresSubstitute && leave.substituteStatus !== 'Accepted') {
+      return sendError(
+        res,
+        400,
+        `Cannot reject leave request while substitute request is ${leave.substituteStatus || 'pending'}. The substitute must accept the request before HOD review.`
+      );
+    }
+
     const user = await User.findById(leave.user);
     if (user && user.leaveBalances) {
       const balanceKey = user.getLeaveBalanceKey(leave.type);
@@ -560,6 +862,7 @@ const rejectLeave = async (req, res) => {
 
     const populatedLeave = await Leave.findById(leave._id)
       .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
       .populate('approvedBy', 'name employeeId');
 
     // Notify Staff
@@ -656,6 +959,241 @@ const cancelLeave = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Get substitute requests assigned to the logged-in staff member
+ * @route   GET /api/leaves/substitute-requests
+ * @access  Private (Staff)
+ */
+const getMySubstituteRequests = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { status } = req.query;
+
+    const filter = {
+      substitute: userId,
+      substituteStatus: { $ne: 'None' },
+    };
+
+    if (status) {
+      filter.substituteStatus = status;
+    }
+
+    const requests = await Leave.find(filter)
+      .populate('user', 'name employeeId staffId designation department email')
+      .populate('department', 'name code')
+      .sort({ createdAt: -1 });
+
+    return sendSuccess(res, 200, 'Substitute requests fetched successfully', {
+      count: requests.length,
+      requests,
+    });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Accept or reject a substitute request (Staff)
+ * @route   PUT /api/leaves/:id/substitute-respond
+ * @access  Private (Staff)
+ */
+const respondToSubstituteRequest = async (req, res) => {
+  try {
+    const leaveId = req.params.id;
+    const { action, remarks } = req.body;
+
+    if (!['accept', 'reject'].includes(action)) {
+      return sendError(res, 400, "Action must be either 'accept' or 'reject'.");
+    }
+
+    const leave = await Leave.findById(leaveId)
+      .populate('user', 'name employeeId department')
+      .populate('department', 'name code');
+
+    if (!leave) {
+      return sendError(res, 404, 'Leave request not found.');
+    }
+
+    if (!leave.substitute || leave.substitute.toString() !== req.user._id.toString()) {
+      return sendError(res, 403, 'Access denied. You are not the assigned substitute for this leave request.');
+    }
+
+    if (leave.status !== 'Pending') {
+      return sendError(res, 400, `Cannot respond to substitute request for a leave that is ${leave.status.toLowerCase()}.`);
+    }
+
+    const fromDateStr = new Date(leave.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+    const toDateStr = new Date(leave.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+    const dateRangeStr = fromDateStr === toDateStr ? fromDateStr : `${fromDateStr} – ${toDateStr}`;
+
+    if (action === 'accept') {
+      leave.substituteStatus = 'Accepted';
+      leave.substituteActionAt = new Date();
+      leave.substituteRemarks = (remarks || 'Accepted by substitute').trim();
+      await leave.save();
+
+      // Notify Applicant
+      await notificationService.createNotification({
+        user: leave.user._id,
+        title: 'Substitute Request Accepted',
+        message: `${req.user.name} accepted your substitute request for leave (${dateRangeStr}). Your request is now ready for HOD review.`,
+        type: 'success',
+        link: '/staff/leave',
+      });
+
+      // Notify HOD
+      const deptId = leave.department?._id || leave.department || leave.user.department;
+      if (deptId) {
+        await notificationService.notifyHOD({
+          departmentId: deptId,
+          title: 'Substitute Accepted',
+          message: `${req.user.name} accepted substitute duty for ${leave.user.name}'s leave (${dateRangeStr}). Ready for review.`,
+          type: 'info',
+          link: '/hod/leave',
+        });
+      }
+
+      return sendSuccess(res, 200, 'Substitute request accepted successfully', { leave });
+    } else {
+      leave.substituteStatus = 'Rejected';
+      leave.substituteActionAt = new Date();
+      leave.substituteRemarks = (remarks || 'Declined by substitute').trim();
+      await leave.save();
+
+      // Notify Applicant
+      await notificationService.createNotification({
+        user: leave.user._id,
+        title: 'Substitute Request Declined',
+        message: `${req.user.name} declined your substitute request for leave (${dateRangeStr}). Please select another eligible substitute.`,
+        type: 'warning',
+        link: '/staff/leave',
+      });
+
+      return sendSuccess(res, 200, 'Substitute request declined', { leave });
+    }
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Reassign an eligible substitute when the previous substitute declined
+ * @route   PUT /api/leaves/:id/reassign-substitute
+ * @access  Private (Staff)
+ */
+const reassignSubstitute = async (req, res) => {
+  try {
+    const leaveId = req.params.id;
+    const { substitute: newSubstituteId } = req.body;
+
+    if (!newSubstituteId) {
+      return sendError(res, 400, 'New substitute ID is required.');
+    }
+
+    const leave = await Leave.findById(leaveId);
+    if (!leave) {
+      return sendError(res, 404, 'Leave request not found.');
+    }
+
+    if (leave.user.toString() !== req.user._id.toString()) {
+      return sendError(res, 403, 'Access denied. You can only update substitute for your own leave request.');
+    }
+
+    if (leave.status !== 'Pending') {
+      return sendError(res, 400, `Cannot reassign substitute for leave with status '${leave.status}'.`);
+    }
+
+    if (leave.substituteStatus !== 'Rejected') {
+      return sendError(res, 400, 'Can only reassign a substitute when the current substitute request was declined.');
+    }
+
+    if (newSubstituteId.toString() === req.user._id.toString()) {
+      return sendError(res, 400, 'You cannot select yourself as a substitute.');
+    }
+
+    // Validate new substitute
+    const newSubUser = await User.findById(newSubstituteId);
+    if (!newSubUser || !newSubUser.isActive) {
+      return sendError(res, 400, 'Selected substitute not found or inactive.');
+    }
+
+    if (!['Staff', 'Non-Teaching Staff'].includes(newSubUser.role)) {
+      return sendError(res, 400, 'Substitute must be a non-teaching staff member.');
+    }
+
+    // Check availability
+    const subOnLeave = await Leave.findOne({
+      user: newSubUser._id,
+      status: 'Approved',
+      fromDate: { $lte: leave.toDate },
+      toDate: { $gte: leave.fromDate },
+    });
+    if (subOnLeave) {
+      return sendError(
+        res,
+        400,
+        `${newSubUser.name} is on approved leave during this period and cannot serve as a substitute.`
+      );
+    }
+
+    const subBusy = await Leave.findOne({
+      substitute: newSubUser._id,
+      substituteStatus: 'Accepted',
+      status: { $in: ['Pending', 'Approved'] },
+      fromDate: { $lte: leave.toDate },
+      toDate: { $gte: leave.fromDate },
+    });
+    if (subBusy) {
+      return sendError(
+        res,
+        400,
+        `${newSubUser.name} is already committed as a substitute for another staff member during this period.`
+      );
+    }
+
+    // Update leave
+    leave.substitute = newSubUser._id;
+    leave.substituteStatus = 'Pending';
+    leave.substituteRemarks = '';
+    leave.substituteActionAt = null;
+    await leave.save();
+
+    const fromDateStr = new Date(leave.fromDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+    const toDateStr = new Date(leave.toDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+    const dateRangeStr = fromDateStr === toDateStr ? fromDateStr : `${fromDateStr} – ${toDateStr}`;
+
+    // Notify new substitute
+    await notificationService.createNotification({
+      user: newSubUser._id,
+      title: 'Substitute Request Received',
+      message: `${req.user.name} has requested you as a substitute for leave from ${dateRangeStr}.`,
+      type: 'info',
+      link: '/staff/leave',
+    });
+
+    // Notify HOD
+    const deptId = leave.department || req.user.department?._id || req.user.department;
+    if (deptId) {
+      await notificationService.notifyHOD({
+        departmentId: deptId,
+        title: 'Substitute Reassigned',
+        message: `${req.user.name} selected a new substitute (${newSubUser.name}) for their leave. Awaiting substitute acceptance.`,
+        type: 'info',
+        link: '/hod/leave',
+      });
+    }
+
+    const populatedLeave = await Leave.findById(leave._id)
+      .populate('user', 'name employeeId staffId designation')
+      .populate('substitute', 'name employeeId staffId designation department')
+      .populate('department', 'name code');
+
+    return sendSuccess(res, 200, 'Substitute reassigned successfully and request sent', { leave: populatedLeave });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
 module.exports = {
   applyLeave,
   getMyLeaves,
@@ -664,4 +1202,10 @@ module.exports = {
   approveLeave,
   rejectLeave,
   cancelLeave,
+  checkSubstituteRequirement,
+  getEligibleSubstitutes,
+  getMySubstituteRequests,
+  respondToSubstituteRequest,
+  reassignSubstitute,
+  checkDepartmentLeaveLimit,
 };

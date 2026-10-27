@@ -28,10 +28,23 @@ const reportRoutes       = require('./routes/report.routes');
 const app = express();
 
 // CORS configuration
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://non-teaching-management.vercel.app',
+  'https://non-teaching-management-m1zdz1bk2-sanjiths-projects-f0f2a6cb.vercel.app',
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173' || 'https://non-teaching-management.vercel.app' || 
-    'https://non-teaching-management-m1zdz1bk2-sanjiths-projects-f0f2a6cb.vercel.app',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(null, origin);
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

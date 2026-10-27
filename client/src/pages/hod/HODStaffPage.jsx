@@ -214,7 +214,19 @@ const HODStaffPage = () => {
                       )}
                     </td>
                     <td>
-                      <StatusBadge status={staff.status} />
+                      <div className="flex flex-col gap-0.5 items-start">
+                        <StatusBadge status={staff.status} />
+                        {staff.status === 'Absent' && (staff.absenceType === 'Uninformed Absence' || staff.remarks?.includes('Uninformed')) && (
+                          <span className="badge-error text-[11px] py-0 px-1.5 font-medium">
+                            Uninformed Absence
+                          </span>
+                        )}
+                        {staff.status === 'Absent' && staff.dailyDeduction > 0 && (
+                          <span className="text-[11px] text-red-600 font-medium">
+                            -₹{staff.dailyDeduction.toLocaleString('en-IN')} deduction
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-xs text-secondary max-w-xs truncate">
                       {staff.remarks || '—'}

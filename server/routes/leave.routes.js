@@ -9,6 +9,11 @@ const {
   approveLeave,
   rejectLeave,
   cancelLeave,
+  checkSubstituteRequirement,
+  getEligibleSubstitutes,
+  getMySubstituteRequests,
+  respondToSubstituteRequest,
+  reassignSubstitute,
 } = require('../controllers/leave.controller');
 
 const { protect } = require('../middleware/auth.middleware');
@@ -17,6 +22,21 @@ const {
   applyLeaveValidation,
   handleValidationErrors,
 } = require('../validators/leave.validator');
+
+// @route   GET /api/leaves/check-substitute-requirement
+// @desc    Check if department leave limit requires substitute
+// @access  Private
+router.get('/check-substitute-requirement', protect, checkSubstituteRequirement);
+
+// @route   GET /api/leaves/eligible-substitutes
+// @desc    Get list of active eligible substitutes across departments
+// @access  Private
+router.get('/eligible-substitutes', protect, getEligibleSubstitutes);
+
+// @route   GET /api/leaves/substitute-requests
+// @desc    Get substitute requests received by logged-in staff
+// @access  Private (Staff)
+router.get('/substitute-requests', protect, getMySubstituteRequests);
 
 // @route   POST /api/leaves
 // @desc    Apply for leave (Staff)
@@ -52,5 +72,15 @@ router.put('/:id/reject', protect, authorize('HOD', 'Admin'), rejectLeave);
 // @desc    Cancel leave request (Staff)
 // @access  Private
 router.put('/:id/cancel', protect, cancelLeave);
+
+// @route   PUT /api/leaves/:id/substitute-respond
+// @desc    Accept or reject substitute request (Staff)
+// @access  Private (Staff)
+router.put('/:id/substitute-respond', protect, respondToSubstituteRequest);
+
+// @route   PUT /api/leaves/:id/reassign-substitute
+// @desc    Reassign a substitute if previous was rejected (Staff)
+// @access  Private (Staff)
+router.put('/:id/reassign-substitute', protect, reassignSubstitute);
 
 module.exports = router;

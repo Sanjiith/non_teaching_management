@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
-import { getAllAttendance, markOrCorrectAttendance } from '../../services/attendance.service';
+import { getAllAttendance, markOrCorrectAttendance, processAbsentees } from '../../services/attendance.service';
 import { getAdminAttendanceReport } from '../../services/report.service';
 import { exportCSV, getAttendanceRateColor } from '../../utils/exportCSV';
 import { consolidateAttendanceRecords } from '../../utils/attendanceHelper';
@@ -26,6 +26,7 @@ const AdminAttendancePage = () => {
   const [newStatus, setNewStatus] = useState('Present');
   const [remarks, setRemarks] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [processingAbsentees, setProcessingAbsentees] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -91,6 +92,19 @@ const AdminAttendancePage = () => {
     }
   };
 
+  const handleProcessAbsentees = async () => {
+    setProcessingAbsentees(true);
+    try {
+      const res = await processAbsentees();
+      alert(res.message || 'Absence processing completed.');
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to process absentees.');
+    } finally {
+      setProcessingAbsentees(false);
+    }
+  };
+
   const handleExportCSV = () => {
     const columns = [
       { key: 'employee', label: 'Employee', getValue: (r) => r.user?.name || '—' },
@@ -116,10 +130,21 @@ const AdminAttendancePage = () => {
             Monitor, filter, and correct staff attendance records across all departments
           </p>
         </div>
-        <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-xs">
-          <span className="material-symbols-outlined text-sm">download</span>
-          Export CSV
-        </button>
+        <div className="flex items-center gap-xs flex-wrap">
+          <button
+            onClick={handleProcessAbsentees}
+            disabled={processingAbsentees}
+            className="btn-primary flex items-center gap-xs"
+            title="Scan and mark uninformed absentees for today if check-in deadline has passed"
+          >
+            <span className="material-symbols-outlined text-sm">schedule</span>
+            {processingAbsentees ? 'Processing...' : 'Run Absence Processing'}
+          </button>
+          <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-xs">
+            <span className="material-symbols-outlined text-sm">download</span>
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Report Filters */}
@@ -247,7 +272,16 @@ const AdminAttendancePage = () => {
                       <td className="text-secondary font-mono text-xs whitespace-nowrap">
                         {r.dateDisplay || dateStr}
                       </td>
-                      <td><StatusBadge status={r.status} /></td>
+                      <td>
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <StatusBadge status={r.status} />
+                          {r.status === 'Absent' && (r.absenceType === 'Uninformed Absence' || r.remarks?.includes('Uninformed')) && (
+                            <span className="badge-error text-[11px] py-0 px-1.5 font-medium">
+                              Uninformed Absence
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="text-secondary text-sm">
                         <div className="flex items-center gap-xs flex-wrap">
                           <span>{r.remarksDisplay || r.remarks || '—'}</span>

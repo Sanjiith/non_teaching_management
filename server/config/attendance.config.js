@@ -54,12 +54,35 @@ const updateAttendanceConfig = (newConfig = {}) => {
 };
 
 /**
- * Convert HH:MM time string to minutes since midnight
+ * Convert time string ("09:00 AM", "2:00 PM", "14:00", "08:30") to minutes since midnight
  */
 const parseTimeToMinutes = (timeStr) => {
-  if (!timeStr || typeof timeStr !== 'string') return 0;
-  const [h, m] = timeStr.split(':').map((v) => parseInt(v, 10));
-  return (h || 0) * 60 + (m || 0);
+  if (!timeStr || typeof timeStr !== 'string') return null;
+  const trimmed = timeStr.trim().toUpperCase();
+
+  // Match "H:MM AM/PM" or "HH:MM AM/PM"
+  const ampmMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1], 10);
+    const minutes = parseInt(ampmMatch[2], 10);
+    const period = ampmMatch[3];
+    if (period === 'AM') {
+      if (hours === 12) hours = 0;
+    } else {
+      if (hours !== 12) hours += 12;
+    }
+    return hours * 60 + minutes;
+  }
+
+  // Match "HH:MM" (24-hour)
+  const h24Match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24Match) {
+    const hours = parseInt(h24Match[1], 10);
+    const minutes = parseInt(h24Match[2], 10);
+    return hours * 60 + minutes;
+  }
+
+  return null;
 };
 
 /**
@@ -155,6 +178,106 @@ const formatTime12Hour = (date, timeZone = config.timeZone) => {
   }
 };
 
+/**
+ * Checks whether an approved leave covers a given date and time.
+ * Evaluates:
+ * 1. Leave status must be 'Approved'. Pending, Rejected, or Cancelled returns false.
+ * 2. Date range: checkDate must fall within [fromDate, toDate] inclusive.
+ * 3. Time window:
+ *    - On start date, if startTime is specified, checkDateTime must be >= startTime.
+ *    - On end date, if endTime is specified, checkDateTime must be <= endTime.
+ *    - For full-day leaves (totalDays >= 1 or standard workday), the leave covers the working day.
+ *
+ * @param {Object} leave - Leave document
+ * @param {Date} checkDateTime - Current Date/Time (default: new Date())
+ * @param {string} timeZone - TimeZone string (default: config.timeZone)
+ * @returns {boolean} true if leave covers checkDateTime
+ */
+const isLeaveCoveringDateTime = (leave, checkDateTime = new Date(), timeZone = config.timeZone) => {
+  if (!leave || leave.status !== 'Approved') {
+    return false;
+  }
+
+  const checkDateUTC = new Date(Date.UTC(
+    checkDateTime.getUTCFullYear(),
+    checkDateTime.getUTCMonth(),
+    checkDateTime.getUTCDate(),
+    0, 0, 0, 0
+  ));
+
+  const fromDateUTC = new Date(Date.UTC(
+    new Date(leave.fromDate).getUTCFullYear(),
+    new Date(leave.fromDate).getUTCMonth(),
+    new Date(leave.fromDate).getUTCDate(),
+    0, 0, 0, 0
+  ));
+
+  const toDateUTC = new Date(Date.UTC(
+    new Date(leave.toDate).getUTCFullYear(),
+    new Date(leave.toDate).getUTCMonth(),
+    new Date(leave.toDate).getUTCDate(),
+    0, 0, 0, 0
+  ));
+
+  // 1. If check date is strictly outside [fromDate, toDate], it does NOT cover current date
+  if (checkDateUTC < fromDateUTC || checkDateUTC > toDateUTC) {
+    return false;
+  }
+
+  const parts = getZonedTimeParts(checkDateTime, timeZone);
+  const currentMinutes = parts.minutesSinceMidnight;
+
+  const startMinutes = parseTimeToMinutes(leave.startTime);
+  const endMinutes = parseTimeToMinutes(leave.endTime);
+
+  // 2. Middle days of a multi-day leave are always fully covered
+  if (checkDateUTC > fromDateUTC && checkDateUTC < toDateUTC) {
+    return true;
+  }
+
+  const isStartDay = checkDateUTC.getTime() === fromDateUTC.getTime();
+  const isEndDay = checkDateUTC.getTime() === toDateUTC.getTime();
+
+  // 3. For full day leaves (totalDays >= 1) where start time is standard workday start (<= 9:30 AM):
+  // It covers the entire workday including morning check-in window
+  const isFullDayOrMultiDay = (leave.totalDays >= 1) || (fromDateUTC.getTime() !== toDateUTC.getTime());
+  if (isFullDayOrMultiDay && (startMinutes === null || startMinutes <= 570) && (endMinutes === null || endMinutes >= 1020)) {
+    return true;
+  }
+
+  // 4. Same-day leave
+  if (isStartDay && isEndDay) {
+    if (startMinutes !== null && endMinutes !== null) {
+      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    }
+    if (startMinutes !== null) {
+      return currentMinutes >= startMinutes;
+    }
+    if (endMinutes !== null) {
+      return currentMinutes <= endMinutes;
+    }
+    return true;
+  }
+
+  // 5. Start day of multi-day leave
+  if (isStartDay) {
+    if (startMinutes !== null) {
+      return currentMinutes >= startMinutes;
+    }
+    return true;
+  }
+
+  // 6. End day of multi-day leave
+  if (isEndDay) {
+    if (endMinutes !== null) {
+      return currentMinutes <= endMinutes;
+    }
+    return true;
+  }
+
+  return true;
+};
+
 module.exports = {
   getAttendanceConfig,
   updateAttendanceConfig,
@@ -164,4 +287,5 @@ module.exports = {
   isBeforeCheckInWindow,
   hasCheckInWindowClosed,
   formatTime12Hour,
+  isLeaveCoveringDateTime,
 };

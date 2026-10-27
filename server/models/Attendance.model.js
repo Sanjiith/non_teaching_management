@@ -42,6 +42,11 @@ const attendanceSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    absenceType: {
+      type: String,
+      enum: ['None', 'Uninformed Absence', 'Informed Absence'],
+      default: 'None',
+    },
   },
   { timestamps: true }
 );

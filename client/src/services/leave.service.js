@@ -34,3 +34,29 @@ export const cancelLeave = async (leaveId, remarks = '') => {
   const response = await api.put(`/leaves/${leaveId}/cancel`, { remarks });
   return response.data.data;
 };
+
+export const checkSubstituteRequirement = async (params = {}) => {
+  const response = await api.get('/leaves/check-substitute-requirement', { params });
+  return response.data.data;
+};
+
+export const getEligibleSubstitutes = async (params = {}) => {
+  const response = await api.get('/leaves/eligible-substitutes', { params });
+  return response.data.data;
+};
+
+export const getMySubstituteRequests = async (params = {}) => {
+  const response = await api.get('/leaves/substitute-requests', { params });
+  return response.data.data;
+};
+
+export const respondToSubstituteRequest = async (leaveId, action, remarks = '') => {
+  const response = await api.put(`/leaves/${leaveId}/substitute-respond`, { action, remarks });
+  return response.data.data;
+};
+
+export const reassignSubstitute = async (leaveId, substituteId) => {
+  const response = await api.put(`/leaves/${leaveId}/reassign-substitute`, { substitute: substituteId });
+  return response.data.data;
+};
+

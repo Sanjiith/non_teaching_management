@@ -165,6 +165,7 @@ const generatePayroll = async (req, res) => {
           leaveDays: breakdown.leaveDays,
           excessLeaveDays: breakdown.excessLeaveDays,
           absentDays: breakdown.absentDays,
+          uninformedAbsentDays: breakdown.uninformedAbsentDays || 0,
           weeklyOffDays: breakdown.weeklyOffDays,
           holidayDays: breakdown.holidayDays,
           dailySalary: breakdown.dailySalary,

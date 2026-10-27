@@ -13,6 +13,7 @@ const {
   getDailyStaffAttendance,
   getAttendanceConfigEndpoint,
   updateAttendanceConfigEndpoint,
+  processAbsenteesEndpoint,
 } = require('../controllers/attendance.controller');
 
 const { protect } = require('../middleware/auth.middleware');
@@ -26,6 +27,11 @@ const {
 // @desc    Staff Check-In (Biometric alternative)
 // @access  Private (Staff, Non-Teaching Staff, HOD)
 router.post('/check-in', protect, checkIn);
+
+// @route   POST /api/attendance/process-absentees
+// @desc    Trigger absence processing for a given date or today
+// @access  Private (Admin)
+router.post('/process-absentees', protect, authorize('Admin'), processAbsenteesEndpoint);
 
 // @route   GET /api/attendance/today
 // @desc    Get current user's today attendance status & check-in time

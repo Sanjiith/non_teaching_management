@@ -140,8 +140,12 @@ const HODPayrollPage = () => {
                       <td className="font-mono text-xs">{fmtINR(p.applicableSalary)}</td>
                       <td className="text-center">{p.totalWorkingDays}</td>
                       <td className="text-center text-emerald-700">{p.presentDays}</td>
-                      <td className="text-center text-amber-600">{p.leaveDays}</td>
-                      <td className="text-center text-error font-semibold">{p.absentDays}</td>
+                      <td className="text-center">
+                        <span className="text-error font-semibold">{p.absentDays}</span>
+                        {p.uninformedAbsentDays > 0 && (
+                          <span className="block text-[11px] text-red-600 font-medium">({p.uninformedAbsentDays} uninformed)</span>
+                        )}
+                      </td>
                       <td className="font-mono text-xs text-error">-{fmtINR(p.absenceDeduction)}</td>
                       <td className="font-mono text-sm font-semibold text-emerald-700">{fmtINR(p.netSalary)}</td>
                       <td><StatusBadge status={p.status} /></td>
@@ -181,7 +185,7 @@ const HODPayrollPage = () => {
                               <BreakdownRow label="Working Days" value={p.totalWorkingDays} />
                               <BreakdownRow label="Present"      value={p.presentDays}    indent />
                               <BreakdownRow label="Leave"        value={p.leaveDays}      indent />
-                              <BreakdownRow label="Absent"       value={p.absentDays}     indent />
+                              <BreakdownRow label="Absent"       value={`${p.absentDays}${p.uninformedAbsentDays > 0 ? ` (${p.uninformedAbsentDays} uninformed)` : ''}`}     indent />
                               <BreakdownRow label="Weekly Off"   value={p.weeklyOffDays}  indent />
                             </div>
                             <div>

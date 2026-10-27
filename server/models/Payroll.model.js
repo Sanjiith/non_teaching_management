@@ -77,6 +77,11 @@ const payrollSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    uninformedAbsentDays: {
+      // Specific count of days classified as Uninformed Absence
+      type: Number,
+      default: 0,
+    },
     weeklyOffDays: {
       type: Number,
       default: 0,

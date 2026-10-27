@@ -280,15 +280,33 @@ const StaffDashboard = () => {
                     <span className="material-symbols-outlined text-xl">check_circle</span>
                     <span>Checked In ({todayAttendance.checkInFormatted})</span>
                   </div>
-                ) : todayAttendance?.status === 'Leave' ? (
-                  <div className="flex items-center gap-xs px-md py-sm bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-200 dark:border-blue-800 text-sm font-semibold">
-                    <span className="material-symbols-outlined text-xl">flight_takeoff</span>
-                    <span>On Approved Leave</span>
+                ) : (todayAttendance?.isOnApprovedLeave || todayAttendance?.status === 'Leave') ? (
+                  <div className="flex flex-col items-start sm:items-end gap-xs">
+                    <div className="flex items-center gap-xs px-md py-sm bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-200 dark:border-blue-800 text-sm font-semibold">
+                      <span className="material-symbols-outlined text-xl">flight_takeoff</span>
+                      <span>{todayAttendance?.leaveMessage || 'You are on approved leave today. Check-in is unavailable.'}</span>
+                    </div>
+                    <button
+                      id="check-in-btn"
+                      disabled
+                      className="btn-secondary opacity-60 cursor-not-allowed flex items-center justify-center gap-xs py-xs px-md text-xs font-semibold"
+                      title="You are on approved leave today. Check-in is unavailable."
+                    >
+                      <span className="material-symbols-outlined text-base">event_busy</span>
+                      <span>Check-In Unavailable</span>
+                    </button>
                   </div>
                 ) : todayAttendance?.status === 'Absent' ? (
-                  <div className="flex items-center gap-xs px-md py-sm bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800 text-sm font-semibold">
-                    <span className="material-symbols-outlined text-xl">cancel</span>
-                    <span>Marked Absent (Window Closed)</span>
+                  <div className="flex flex-col items-start sm:items-end gap-xs">
+                    <div className="flex items-center gap-xs px-md py-sm bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800 text-sm font-semibold">
+                      <span className="material-symbols-outlined text-xl">cancel</span>
+                      <span>Marked Absent ({todayAttendance?.absenceType || 'Uninformed Absence'})</span>
+                    </div>
+                    {todayAttendance?.dailyDeduction > 0 && (
+                      <span className="text-[11px] text-red-600 dark:text-red-400 font-medium">
+                        Daily salary deduction: ₹{todayAttendance.dailyDeduction.toLocaleString('en-IN')}
+                      </span>
+                    )}
                   </div>
                 ) : todayAttendance?.window?.isBefore ? (
                   <button
@@ -299,15 +317,22 @@ const StaffDashboard = () => {
                     <span>Window Opens at {todayAttendance?.window?.startTime}</span>
                   </button>
                 ) : (
-                  <button
-                    id="check-in-btn"
-                    onClick={handleCheckIn}
-                    disabled={checkingIn}
-                    className="btn-primary flex items-center justify-center gap-xs py-sm px-lg text-sm font-bold shadow-md hover:shadow-lg transition-all"
-                  >
-                    <span className="material-symbols-outlined text-xl">fingerprint</span>
-                    <span>{checkingIn ? 'Checking In...' : 'Check In Now'}</span>
-                  </button>
+                  <div className="flex flex-col items-start sm:items-end gap-xs">
+                    <button
+                      id="check-in-btn"
+                      onClick={handleCheckIn}
+                      disabled={checkingIn || !todayAttendance?.canCheckIn}
+                      className="btn-primary flex items-center justify-center gap-xs py-sm px-lg text-sm font-bold shadow-md hover:shadow-lg transition-all"
+                    >
+                      <span className="material-symbols-outlined text-xl">fingerprint</span>
+                      <span>{checkingIn ? 'Checking In...' : 'Check In Now'}</span>
+                    </button>
+                    {todayAttendance?.pendingLeaveDetails && (
+                      <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                        Leave request pending approval
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

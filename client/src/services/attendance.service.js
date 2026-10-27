@@ -54,3 +54,8 @@ export const updateAttendanceConfig = async (data) => {
   const response = await api.put('/attendance/config', data);
   return response.data.data;
 };
+
+export const processAbsentees = async (data = {}) => {
+  const response = await api.post('/attendance/process-absentees', data);
+  return response.data;
+};
