@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getRoleLabel } from '../../utils/roleHelpers';
 import { ROUTES } from '../../config/constants';
-import { getMyAttendance } from '../../services/attendance.service';
+import { getMyAttendance, staffCheckIn, getTodayAttendance } from '../../services/attendance.service';
 import { getMyLeaves, applyLeave } from '../../services/leave.service';
 import { getMySchedules } from '../../services/schedule.service';
 import { getMyPayroll } from '../../services/payroll.service';
@@ -33,6 +33,11 @@ const StaffDashboard = () => {
   const [latestPayroll, setLatestPayroll] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Check-In state
+  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [checkInMessage, setCheckInMessage] = useState(null);
+
   // Apply Leave Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -50,20 +55,25 @@ const StaffDashboard = () => {
   const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      const [attData, leavesData, schedData, payrollData] = await Promise.all([
+      const [attData, leavesData, schedData, payrollData, todayAttData] = await Promise.all([
         getMyAttendance({ limit: 7 }),
         getMyLeaves({ limit: 5 }),
         getMySchedules(),
         getMyPayroll({ limit: 1 }),
+        getTodayAttendance().catch(() => null),
       ]);
 
-      setAttendanceRecords(attData.records || []);
-      if (attData.stats) setAttendanceStats(attData.stats);
-      setLeavesList(leavesData.leaves || []);
-      if (leavesData.leaveBalances) {
+      setAttendanceRecords(attData?.records || []);
+      if (attData?.stats) setAttendanceStats(attData.stats);
+      setLeavesList(leavesData?.leaves || []);
+      if (leavesData?.leaveBalances) {
         setBalances(leavesData.leaveBalances);
       } else if (user?.leaveBalances) {
         setBalances(user.leaveBalances);
+      }
+
+      if (todayAttData) {
+        setTodayAttendance(todayAttData);
       }
 
       const todayStr = new Date().toISOString().split('T')[0];
@@ -81,6 +91,28 @@ const StaffDashboard = () => {
       setLoading(false);
     }
   }, [user]);
+
+  const handleCheckIn = async () => {
+    setCheckingIn(true);
+    setCheckInMessage(null);
+    try {
+      const res = await staffCheckIn();
+      setCheckInMessage({
+        type: 'success',
+        text: res.message || 'Check-in successful! Attendance marked as Present.',
+      });
+      await loadDashboardData();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Failed to check in.';
+      setCheckInMessage({
+        type: 'error',
+        text: msg,
+      });
+      await loadDashboardData();
+    } finally {
+      setCheckingIn(false);
+    }
+  };
 
   useEffect(() => {
     loadDashboardData();
@@ -205,6 +237,98 @@ const StaffDashboard = () => {
 
         {/* ── Right Column ─────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-md">
+          {/* ── Daily Attendance & Check-In Card ────────────────── */}
+          <div className="bit-card p-lg border-l-4 border-l-primary relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-md">
+              <div className="space-y-xs">
+                <div className="flex items-center gap-xs flex-wrap">
+                  <span className="material-symbols-outlined text-primary text-2xl">how_to_reg</span>
+                  <h3 className="font-title-lg text-title-lg text-on-surface font-bold">
+                    Daily Attendance Check-In
+                  </h3>
+                  {todayAttendance && <StatusBadge status={todayAttendance.status} />}
+                </div>
+                <p className="font-body-sm text-body-sm text-secondary">
+                  Biometric attendance alternative • Window: {todayAttendance?.window?.startTime || '08:00'} – {todayAttendance?.window?.endTime || '11:00'} ({todayAttendance?.window?.timeZone || 'Asia/Kolkata'})
+                </p>
+
+                {/* Attendance details & Check-in timestamp */}
+                <div className="flex flex-wrap items-center gap-md mt-sm pt-xs text-sm">
+                  <div className="flex items-center gap-xs">
+                    <span className="text-secondary font-medium">Status:</span>
+                    <span className="font-semibold text-on-surface">{todayAttendance?.status || 'Pending Check-In'}</span>
+                  </div>
+                  <div className="flex items-center gap-xs">
+                    <span className="text-secondary font-medium">Check-In Time:</span>
+                    <span className="font-semibold font-mono text-on-surface">
+                      {todayAttendance?.checkInFormatted || '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-xs">
+                    <span className="text-secondary font-medium">Window:</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-surface-container-high text-on-surface">
+                      {todayAttendance?.window?.statusText || 'Checking window...'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Check-In Action Button */}
+              <div className="flex flex-col items-start sm:items-end gap-xs w-full sm:w-auto">
+                {todayAttendance?.alreadyCheckedIn ? (
+                  <div className="flex items-center gap-xs px-md py-sm bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-lg border border-emerald-200 dark:border-emerald-800 text-sm font-semibold">
+                    <span className="material-symbols-outlined text-xl">check_circle</span>
+                    <span>Checked In ({todayAttendance.checkInFormatted})</span>
+                  </div>
+                ) : todayAttendance?.status === 'Leave' ? (
+                  <div className="flex items-center gap-xs px-md py-sm bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-200 dark:border-blue-800 text-sm font-semibold">
+                    <span className="material-symbols-outlined text-xl">flight_takeoff</span>
+                    <span>On Approved Leave</span>
+                  </div>
+                ) : todayAttendance?.status === 'Absent' ? (
+                  <div className="flex items-center gap-xs px-md py-sm bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800 text-sm font-semibold">
+                    <span className="material-symbols-outlined text-xl">cancel</span>
+                    <span>Marked Absent (Window Closed)</span>
+                  </div>
+                ) : todayAttendance?.window?.isBefore ? (
+                  <button
+                    disabled
+                    className="btn-secondary opacity-60 cursor-not-allowed flex items-center gap-xs py-sm px-lg"
+                  >
+                    <span className="material-symbols-outlined text-xl">schedule</span>
+                    <span>Window Opens at {todayAttendance?.window?.startTime}</span>
+                  </button>
+                ) : (
+                  <button
+                    id="check-in-btn"
+                    onClick={handleCheckIn}
+                    disabled={checkingIn}
+                    className="btn-primary flex items-center justify-center gap-xs py-sm px-lg text-sm font-bold shadow-md hover:shadow-lg transition-all"
+                  >
+                    <span className="material-symbols-outlined text-xl">fingerprint</span>
+                    <span>{checkingIn ? 'Checking In...' : 'Check In Now'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Feedback message banner */}
+            {checkInMessage && (
+              <div
+                className={`mt-md p-sm rounded-lg text-sm flex items-center gap-xs ${
+                  checkInMessage.type === 'success'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800'
+                    : 'bg-red-100 dark:bg-red-950/50 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-base">
+                  {checkInMessage.type === 'success' ? 'check_circle' : 'error'}
+                </span>
+                <span>{checkInMessage.text}</span>
+              </div>
+            )}
+          </div>
+
           {/* Quick stats */}
           <div className="grid grid-cols-3 gap-md">
             <div className="kpi-card">
@@ -214,7 +338,7 @@ const StaffDashboard = () => {
             </div>
             <div className="kpi-card">
               <div className="kpi-label">Days on Leave</div>
-              <div className="kpi-value text-amber-600">{attendanceStats.leaveDays}</div>
+              <div className="kpi-value text-amber-600">{attendanceStats.totalLeaveDays ?? attendanceStats.leaveDays}</div>
               <div className="kpi-sub">Approved leaves</div>
             </div>
             <div className="kpi-card">

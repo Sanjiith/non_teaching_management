@@ -4,6 +4,7 @@ import { getDepartmentLeaves, approveLeave, rejectLeave } from '../../services/l
 
 const HODLeavePage = () => {
   const [leaves, setLeaves] = useState([]);
+  const [leaveStats, setLeaveStats] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
@@ -15,6 +16,7 @@ const HODLeavePage = () => {
         status: statusFilter || undefined,
       });
       setLeaves(data.leaves || []);
+      if (data.stats) setLeaveStats(data.stats);
     } catch (err) {
       console.error('Error fetching department leaves:', err);
     } finally {
@@ -77,6 +79,23 @@ const HODLeavePage = () => {
           </select>
         </div>
       </div>
+
+      {/* Leave Summary Stats */}
+      {leaveStats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+          {[
+            { label: 'Total Applications', value: leaveStats.total || leaveStats.totalApplications || leaves.length, color: 'text-on-surface' },
+            { label: 'Pending', value: leaveStats.pending || 0, color: 'text-amber-600' },
+            { label: 'Approved', value: leaveStats.approved || 0, color: 'text-emerald-600' },
+            { label: 'Rejected', value: leaveStats.rejected || 0, color: 'text-red-600' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="kpi-card">
+              <div className="kpi-label">{label}</div>
+              <div className={`kpi-value ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="bit-card">
         <h3 className="font-title-md text-title-md text-on-surface mb-md">Leave Requests</h3>

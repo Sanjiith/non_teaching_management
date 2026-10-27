@@ -1,0 +1,686 @@
+================================================================================
+                  BIT NON-TEACHING STAFF PORTAL
+                       PROJECT REPORT
+================================================================================
+Institution  : Bannari Amman Institute of Technology (BIT Sathy)
+Project Type : Full-Stack Web Application (MERN Stack)
+Purpose      : Digital management system for non-teaching staff operations
+Repository   : https://github.com/Sanjiith/non_teaching_management
+License      : Internal Use — Bannari Amman Institute of Technology, Sathyamangalam
+================================================================================
+
+
+--------------------------------------------------------------------------------
+1. ABSTRACT
+--------------------------------------------------------------------------------
+
+The BIT Non-Teaching Staff Portal is a full-stack web application built for
+Bannari Amman Institute of Technology (BIT Sathy) to digitally manage the
+administrative workflows of non-teaching staff. The backend runs on Node.js with
+Express and MongoDB via Mongoose, and the frontend is a React 18 application
+bundled with Vite, styled using Tailwind CSS, and communicating with the server
+through Axios. The system defines three user roles: Admin, HOD (Head of
+Department), and Staff, each with a separate protected dashboard and set of
+pages. Authentication is JWT-based; users log in with their employee ID or email
+and password, the server verifies credentials using bcrypt, issues a signed JWT,
+and the client stores it in localStorage. Every protected API route runs through
+auth middleware and role-based authorization middleware, and a department-level
+isolation guard prevents HODs and Staff from accessing data belonging to other
+departments. The system covers department management, staff management, shift
+configuration, daily scheduling, attendance tracking, leave management with
+balance tracking, server-side payroll calculation, in-app notifications, and
+role-scoped reporting — all backed by dedicated input validators, a database seed
+script, a migration script, and a suite of seven test files.
+
+
+--------------------------------------------------------------------------------
+2. INTRODUCTION
+--------------------------------------------------------------------------------
+
+2.1 Problem Statement
+---------------------
+Educational institutions like BIT Sathy manage a large number of non-teaching
+staff across multiple departments. Traditionally, tasks such as attendance
+marking, leave applications, payroll computation, and shift scheduling were
+handled manually using paper registers or isolated spreadsheets. This approach is
+error-prone, time-consuming, and lacks a centralized view for management.
+
+2.2 Motivation
+--------------
+The need for a unified digital system that gives administrators, department heads,
+and staff a single platform to manage and track all HR-related operations led to
+the development of this portal. The goal is to reduce manual effort, improve
+transparency, and ensure accurate payroll calculation based on real attendance
+data.
+
+2.3 Objectives
+--------------
+- Provide role-based access for Admin, HOD, and Staff users.
+- Digitize attendance marking, leave applications, and approvals.
+- Automate salary calculation based on attendance records.
+- Allow shift creation and daily schedule assignment for staff.
+- Generate attendance, leave, and payroll reports per role scope.
+- Send in-app notifications for key events like leave approvals.
+- Ensure security through JWT authentication and role-based middleware.
+
+
+--------------------------------------------------------------------------------
+3. TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+
+Frontend:
+  - React 18 (UI library)
+  - Vite (build tool and development server)
+  - Tailwind CSS (utility-first styling)
+  - Axios (HTTP client for API requests)
+  - React Router DOM (client-side routing)
+
+Backend:
+  - Node.js (runtime environment)
+  - Express.js (web framework)
+  - MongoDB (NoSQL database)
+  - Mongoose (ODM for MongoDB)
+  - bcryptjs (password hashing)
+  - jsonwebtoken / JWT (authentication tokens)
+  - express-validator (input validation)
+  - morgan (HTTP request logging)
+  - cors (Cross-Origin Resource Sharing)
+
+Development & Testing:
+  - dotenv (environment variable management)
+  - nodemon (development auto-restart)
+  - Jest / custom test scripts (unit and integration testing)
+
+Environment Variables:
+  Server:
+    PORT=5000
+    MONGODB_URI=mongodb://localhost:27017/bit_portal
+    JWT_SECRET=your_jwt_secret
+    JWT_EXPIRES_IN=7d
+    CLIENT_URL=http://localhost:5173
+
+  Client:
+    VITE_API_URL=http://localhost:5000/api
+    VITE_APP_NAME=BIT Non-Teaching Staff Portal
+
+
+--------------------------------------------------------------------------------
+4. SYSTEM ARCHITECTURE
+--------------------------------------------------------------------------------
+
+The application follows a standard three-tier client-server architecture:
+
+  [Browser / React Client]
+         |
+         | HTTP Requests (Axios)
+         v
+  [Express.js REST API Server]
+         |
+         | Mongoose ODM
+         v
+  [MongoDB Database]
+
+Client Layer:
+  The React frontend uses React Router for navigation and AuthContext for global
+  authentication state. Each user role has a dedicated layout wrapper
+  (AdminLayout, HODLayout, StaffLayout) and protected routes enforced by the
+  ProtectedRoute component. The client communicates with the backend exclusively
+  through RESTful API calls using Axios.
+
+Server Layer:
+  The Express server organizes all logic into the following layers:
+  - Routes: Define API endpoints and attach middleware chains.
+  - Middleware: Handle authentication (JWT verification) and authorization
+    (role checking and department isolation).
+  - Validators: Validate and sanitize all incoming request data.
+  - Controllers: Handle business logic and prepare responses.
+  - Services: Contain pure business logic (payroll calculation, notifications)
+    separated from controller code for testability.
+  - Models: Define Mongoose schemas for all database collections.
+
+Database Layer:
+  MongoDB stores all application data in 8 collections:
+  Users, Departments, Attendance, Leaves, Shifts, Schedules, Payroll,
+  and Notifications.
+
+
+--------------------------------------------------------------------------------
+5. USER ROLES AND ACCESS CONTROL
+--------------------------------------------------------------------------------
+
+5.1 Admin
+---------
+- Full system access across all departments.
+- Can create, update, and deactivate departments.
+- Can create, view, update, and delete staff accounts.
+- Can create and manage shift templates.
+- Can assign shifts to staff via daily schedule entries.
+- Can mark and correct attendance for any staff.
+- Can approve or reject leave requests from any department.
+- Can generate and manage payroll records (Draft, Processed, Paid).
+- Can view system-wide reports (attendance, leave, payroll, schedule).
+
+5.2 HOD (Head of Department)
+-----------------------------
+- Scoped strictly to their own department.
+- Can view attendance of department staff.
+- Can mark or correct attendance for department staff.
+- Can approve or reject leave requests from their department.
+- Can assign and update shift schedules for their department staff.
+- Can view payroll records of staff within their department.
+- Can view department-scoped reports (attendance, leave, schedule).
+
+5.3 Staff (Non-Teaching Staff)
+-------------------------------
+- Can view their own attendance history and statistics.
+- Can apply for leave specifying type, date range, time, and reason.
+- Can view and cancel their own leave applications.
+- Can view their own assigned daily schedule.
+- Can view their own payroll slips.
+- Can view their own personal reports (attendance, leave, payroll).
+- Can update their own profile information.
+
+Access is enforced on the server through:
+  - auth.middleware.js  : Verifies the JWT token on every protected route.
+  - role.middleware.js  : Checks role permissions (authorize function).
+  - departmentAccessGuard: Blocks HOD/Staff from accessing other departments.
+  - userAccessGuard     : Blocks Staff from accessing other users' data.
+
+
+--------------------------------------------------------------------------------
+6. IMPLEMENTED MODULES
+--------------------------------------------------------------------------------
+
+6.1 Authentication Module
+--------------------------
+- Login using Employee ID (or email) and password.
+- Server verifies credentials with bcrypt.compare().
+- Issues a signed JWT token (expires in 7 days).
+- Client stores token in localStorage and restores session on reload.
+- /api/auth/me returns the currently authenticated user.
+- Logout endpoint clears the session on the client side.
+
+6.2 Department Management
+--------------------------
+- Admin can create departments with a unique name, unique code, and assigned HOD.
+- Admin can update or delete departments.
+- All authenticated users can list departments.
+- HOD and Staff are restricted to viewing only their own department.
+
+6.3 Staff (User) Management
+-----------------------------
+- Admin can create staff accounts with: name, employee ID, designation, phone,
+  joining date, basic salary, department, role, and profile image.
+- Admin can update or delete any staff account.
+- HOD can view staff within their department.
+- Staff can view and update their own profile.
+- Accounts have an isActive flag; inactive accounts cannot log in.
+
+6.4 Shift Management
+---------------------
+- Admin creates shift templates with a name, start time, end time, working hours,
+  optional department scope, and active status.
+- Shifts are available to be assigned to staff via the schedule module.
+- Admin can update or delete shift templates.
+- All authenticated users can view available shifts.
+
+6.5 Schedule Management
+------------------------
+- Admin and HOD can assign a shift to a specific staff member on a specific date.
+- Each schedule entry links a staff member, department, shift, and date with
+  start/end times and a status (Scheduled, Completed, Cancelled, On Leave,
+  Conflict).
+- A unique constraint prevents assigning more than one shift per staff per day.
+- Staff can view their own upcoming schedule.
+- HOD/Admin can view all schedules for their department.
+- A notification is sent to the staff member when a schedule is assigned.
+- Admin and HOD can update or delete schedule entries.
+
+6.6 Attendance Management
+--------------------------
+- Admin and HOD can mark or correct attendance for staff.
+- Each attendance record stores: user, date, status, optional check-in time,
+  optional check-out time, shift reference, and remarks.
+- Status values: Present, Absent, Leave, Holiday, Weekly Off.
+- A unique constraint prevents duplicate attendance records per user per day.
+- Staff can view their own attendance history.
+- Attendance data is used directly in payroll calculation.
+
+6.7 Leave Management
+---------------------
+- Staff can submit leave applications with:
+    Type    : Casual Leave, Medical Leave, Earned Leave, Maternity Leave,
+              Paternity Leave, or Other.
+    Dates   : From date, to date (totalDays auto-calculated).
+    Time    : Optional start and end time (supports half-day = 0.5 days).
+    Reason  : Free-text reason field.
+- Leave balances are tracked per staff with 12 days allocated each for
+  Casual, Medical, and Earned leave per year.
+- On application submission: days are reserved from the balance.
+- On approval: reserved days are marked as used.
+- On rejection or cancellation: reserved days are released back.
+- Overlap detection prevents a staff from submitting overlapping date ranges.
+- HOD and Admin can approve or reject leave applications.
+- Staff can cancel their own pending leave applications.
+- Notifications are triggered on submit, approve, reject, and cancel events.
+
+6.8 Payroll Management
+-----------------------
+- Payroll is generated server-side only by the Admin.
+- Payroll preview (dry run) available before saving.
+- Calculation formula:
+    applicableSalary  = min(basicSalary, 40000)
+    totalWorkingDays  = calendar days in month (excluding Sundays + holidays)
+    dailySalary       = applicableSalary / totalWorkingDays
+    absenceDeduction  = unauthorizedAbsentDays * dailySalary
+    grossSalary       = applicableSalary + totalAllowances
+    netSalary         = grossSalary - absenceDeduction - totalDeductions
+- Approved leave days do NOT cause deductions.
+- Weekly offs and holidays are NOT counted as working days.
+- Allowance fields: HRA, DA, TA, Medical, Other (default zero).
+- Deduction fields: PF, PT, TDS, Loan Repayment, Other (default zero).
+- Payroll status lifecycle: Draft → Processed → Paid.
+- Unique constraint prevents duplicate payroll per user per month per year.
+- HOD can view payroll records for their department staff.
+- Staff can view their own payroll slips.
+
+6.9 Notification System
+------------------------
+- In-app notifications are stored in the database linked to individual users.
+- Notification types: info, success, warning, error.
+- Notifications have a title, message, type, read status, and optional link.
+- Triggered automatically by: leave apply, leave approve, leave reject,
+  leave cancel, and schedule assignment.
+- Users can fetch their own unread notifications.
+
+6.10 Reports Module
+--------------------
+Admin Reports:
+  - /api/reports/admin/attendance : Attendance summary (all staff, filterable by
+    month, year, department). Includes per-department breakdown.
+  - /api/reports/admin/leave      : Leave summary across all staff.
+  - /api/reports/admin/payroll    : Payroll overview for all staff.
+  - /api/reports/admin/schedule   : Schedule report across all departments.
+
+HOD Reports (department-scoped):
+  - /api/reports/hod/attendance   : Attendance for HOD's department.
+  - /api/reports/hod/leave        : Leave summary for HOD's department.
+  - /api/reports/hod/schedule     : Schedule report for HOD's department.
+
+Staff Personal Reports:
+  - /api/reports/my/attendance    : Own attendance summary.
+  - /api/reports/my/leave         : Own leave history and balances.
+  - /api/reports/my/payroll       : Own payroll history.
+
+
+--------------------------------------------------------------------------------
+7. DATABASE DESIGN
+--------------------------------------------------------------------------------
+
+7.1 User Collection
+--------------------
+Field          | Type     | Description
+---------------|----------|--------------------------------------------------
+employeeId     | String   | Unique employee ID (uppercase, required)
+staffId        | String   | Alias synced with employeeId
+name           | String   | Full name (required)
+email          | String   | Unique email address (required)
+password       | String   | Bcrypt-hashed password (hidden from responses)
+role           | String   | Admin / HOD / Staff / Non-Teaching Staff
+department     | ObjectId | Reference to Department
+designation    | String   | Job designation
+phone          | String   | Contact number
+joiningDate    | Date     | Date of joining
+basicSalary    | Number   | Monthly basic salary (no max enforced at model)
+leaveBalances  | Object   | casualLeave, medicalLeave, earnedLeave balances
+profileImage   | String   | URL or path to profile image
+isActive       | Boolean  | Account active status (default: true)
+lastLogin      | Date     | Timestamp of last login
+
+7.2 Department Collection
+--------------------------
+Field       | Type     | Description
+------------|----------|-----------------------------------------------
+name        | String   | Unique department name (required)
+code        | String   | Unique department code (uppercase, required)
+hod         | ObjectId | Reference to HOD user
+description | String   | Optional department description
+isActive    | Boolean  | Department active status (default: true)
+
+7.3 Attendance Collection
+--------------------------
+Field     | Type     | Description
+----------|----------|-----------------------------------------------
+user      | ObjectId | Reference to User (required)
+date      | Date     | Attendance date (normalized to UTC midnight)
+status    | String   | Present / Absent / Leave / Holiday / Weekly Off
+checkIn   | Date     | Check-in timestamp (optional)
+checkOut  | Date     | Check-out timestamp (optional)
+shift     | ObjectId | Reference to Shift (optional)
+remarks   | String   | Additional notes
+Unique Index: { user, date }
+
+7.4 Leave Collection
+---------------------
+Field           | Type     | Description
+----------------|----------|-----------------------------------------------
+user            | ObjectId | Reference to User (required)
+department      | ObjectId | Reference to Department
+type            | String   | Leave type (6 types supported)
+fromDate        | Date     | Start date of leave
+toDate          | Date     | End date of leave
+startTime       | String   | Optional start time (for half-day detection)
+endTime         | String   | Optional end time
+totalDays       | Number   | Total leave days (min 0.5)
+reason          | String   | Reason for leave (required)
+status          | String   | Pending / Approved / Rejected / Cancelled
+approvedBy      | ObjectId | Reference to User who approved/rejected
+approvalRemarks | String   | Optional remarks from approver
+approvedAt      | Date     | Timestamp of approval/rejection
+document        | String   | Optional supporting document
+
+7.5 Shift Collection
+---------------------
+Field        | Type     | Description
+-------------|----------|-----------------------------------------------
+name         | String   | Shift name (required)
+startTime    | String   | Start time in HH:MM format (required)
+endTime      | String   | End time in HH:MM format (required)
+workingHours | Number   | Total working hours (default: 8)
+department   | ObjectId | Optional department scope (null = all)
+description  | String   | Optional description
+isActive     | Boolean  | Shift active status (default: true)
+
+7.6 Schedule Collection
+------------------------
+Field      | Type     | Description
+-----------|----------|-----------------------------------------------
+staff      | ObjectId | Reference to User (required)
+department | ObjectId | Reference to Department (required)
+shift      | ObjectId | Reference to Shift (required)
+date       | Date     | Scheduled date (required)
+startTime  | String   | Override start time in HH:MM
+endTime    | String   | Override end time in HH:MM
+status     | String   | Scheduled / Completed / Cancelled / On Leave / Conflict
+remarks    | String   | Optional notes
+Unique Index: { staff, date }
+
+7.7 Payroll Collection
+-----------------------
+Field             | Type     | Description
+------------------|----------|-----------------------------------------------
+user              | ObjectId | Reference to User (required)
+month             | Number   | Month number 1-12 (required)
+year              | Number   | Year (min 2024, required)
+basicSalary       | Number   | Staff's basic salary at time of generation
+applicableSalary  | Number   | min(basicSalary, 40000)
+totalWorkingDays  | Number   | Calendar working days in the month
+presentDays       | Number   | Days marked Present
+leaveDays         | Number   | Approved leave days (no deduction)
+excessLeaveDays   | Number   | Leaves taken beyond entitlement
+absentDays        | Number   | Unauthorized absent days (cause deduction)
+weeklyOffDays     | Number   | Weekly off days
+holidayDays       | Number   | Holiday days
+dailySalary       | Number   | applicableSalary / totalWorkingDays
+absenceDeduction  | Number   | absentDays * dailySalary
+allowances        | Object   | HRA, DA, TA, Medical, Other (default 0)
+deductions        | Object   | PF, PT, TDS, LoanRepayment, Other (default 0)
+grossSalary       | Number   | applicableSalary + total allowances
+netSalary         | Number   | grossSalary - absenceDeduction - total deductions
+status            | String   | Draft / Processed / Paid
+generatedBy       | ObjectId | Reference to Admin who generated payroll
+paidAt            | Date     | Timestamp of payment
+remarks           | String   | Optional notes
+holidays          | [Date]   | Snapshot of holidays used in this calculation
+Unique Index: { user, month, year }
+
+7.8 Notification Collection
+-----------------------------
+Field   | Type     | Description
+--------|----------|-----------------------------------------------
+user    | ObjectId | Reference to User (required)
+title   | String   | Notification title (required)
+message | String   | Notification body (required)
+type    | String   | info / success / warning / error
+isRead  | Boolean  | Read status (default: false)
+link    | String   | Optional navigation link
+
+
+--------------------------------------------------------------------------------
+8. API REFERENCE
+--------------------------------------------------------------------------------
+
+BASE URL: http://localhost:5000/api
+Authentication: Bearer <JWT Token> in Authorization header
+
+8.1 Authentication
+-------------------
+POST   /api/auth/login    - Login with employeeId/email and password (Public)
+GET    /api/auth/me       - Get currently authenticated user (Private)
+POST   /api/auth/logout   - Logout (Private)
+
+8.2 Users (Staff Management)
+------------------------------
+GET    /api/users         - List users (Admin: all, HOD: dept staff)
+GET    /api/users/:id     - Get user by ID (role-scoped access)
+POST   /api/users         - Create new user (Admin only)
+PUT    /api/users/:id     - Update user (Admin/HOD for dept staff/Staff for self)
+DELETE /api/users/:id     - Delete user (Admin only)
+
+8.3 Departments
+----------------
+GET    /api/departments      - List all departments (All authenticated)
+GET    /api/departments/:id  - Get department by ID (dept-scoped for HOD/Staff)
+POST   /api/departments      - Create department (Admin only)
+PUT    /api/departments/:id  - Update department (Admin only)
+DELETE /api/departments/:id  - Delete department (Admin only)
+
+8.4 Attendance
+---------------
+GET    /api/attendance/my              - Own attendance records (Staff)
+GET    /api/attendance/department      - Department attendance (HOD, Admin)
+GET    /api/attendance/stats           - Today's summary KPIs (All)
+GET    /api/attendance/user/:userId    - Specific staff attendance (role-scoped)
+GET    /api/attendance                 - All attendance (Admin, HOD)
+POST   /api/attendance/mark            - Mark attendance record (Admin, HOD)
+POST   /api/attendance                 - Mark attendance record (Admin, HOD)
+PUT    /api/attendance/:id             - Correct attendance record (Admin, HOD)
+
+8.5 Leaves
+-----------
+POST   /api/leaves                - Apply for leave (All authenticated)
+GET    /api/leaves/my             - Own leave history and balances (All)
+GET    /api/leaves/department     - Department leave requests (HOD, Admin)
+GET    /api/leaves                - All leave requests (Admin, HOD)
+PUT    /api/leaves/:id/approve    - Approve leave (HOD, Admin)
+PUT    /api/leaves/:id/reject     - Reject leave (HOD, Admin)
+PUT    /api/leaves/:id/cancel     - Cancel leave (Staff)
+
+8.6 Shifts
+-----------
+GET    /api/shifts      - List all shifts (All authenticated)
+GET    /api/shifts/:id  - Get shift by ID (All authenticated)
+POST   /api/shifts      - Create shift template (Admin only)
+PUT    /api/shifts/:id  - Update shift (Admin only)
+DELETE /api/shifts/:id  - Delete shift (Admin only)
+
+8.7 Schedules
+--------------
+GET    /api/schedules/my          - Own schedule (Staff)
+GET    /api/schedules/department  - Department schedules (HOD, Admin)
+GET    /api/schedules             - All schedules (Admin only)
+POST   /api/schedules             - Assign shift schedule (Admin, HOD)
+PUT    /api/schedules/:id         - Update schedule (Admin, HOD)
+DELETE /api/schedules/:id         - Delete schedule (Admin, HOD)
+
+8.8 Payroll
+------------
+GET    /api/payroll/stats         - Payroll summary KPIs (Admin, HOD)
+GET    /api/payroll/my            - Own payroll records (All authenticated)
+POST   /api/payroll/preview       - Preview payroll calculation (Admin only)
+POST   /api/payroll/generate      - Generate and save payroll (Admin only)
+GET    /api/payroll               - List payroll records (role-scoped)
+PATCH  /api/payroll/:id/status    - Update payroll status (Admin only)
+GET    /api/payroll/:id           - Get single payroll record (role-scoped)
+
+8.9 Notifications
+------------------
+GET    /api/notifications   - Get notifications for logged-in user (All)
+
+8.10 Reports
+-------------
+GET    /api/reports/admin/attendance  - Admin attendance report (Admin only)
+GET    /api/reports/admin/leave       - Admin leave report (Admin only)
+GET    /api/reports/admin/payroll     - Admin payroll report (Admin only)
+GET    /api/reports/admin/schedule    - Admin schedule report (Admin only)
+GET    /api/reports/hod/attendance    - HOD attendance report (Admin, HOD)
+GET    /api/reports/hod/leave         - HOD leave report (Admin, HOD)
+GET    /api/reports/hod/schedule      - HOD schedule report (Admin, HOD)
+GET    /api/reports/my/attendance     - Staff personal attendance report
+GET    /api/reports/my/leave          - Staff personal leave report
+GET    /api/reports/my/payroll        - Staff personal payroll report
+
+8.11 Health Check
+------------------
+GET    /api/health   - Server health status (Public)
+
+
+--------------------------------------------------------------------------------
+9. PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+
+BIT-Non-Teaching-Staff-Portal/
+|
+|-- client/                         (React frontend)
+|   |-- src/
+|       |-- pages/
+|       |   |-- admin/              (AdminDashboard, AttendancePage, LeavePage,
+|       |   |                        PayrollPage, ShiftPage, StaffPage,
+|       |   |                        DepartmentsPage)
+|       |   |-- hod/                (HODDashboard, AttendancePage, LeavePage,
+|       |   |                        SchedulePage, PayrollPage)
+|       |   |-- staff/              (StaffDashboard, LeavePage, SchedulePage,
+|       |   |                        PayrollPage, AttendancePage)
+|       |   |-- auth/               (LoginPage)
+|       |-- layouts/                (AdminLayout, HODLayout, StaffLayout,
+|       |                            AuthLayout)
+|       |-- routes/                 (AppRoutes.jsx, ProtectedRoute.jsx)
+|       |-- services/               (auth.service.js, api.js,
+|       |                            attendance.service.js, leave.service.js,
+|       |                            notification.service.js, payroll.service.js,
+|       |                            report.service.js, schedule.service.js)
+|       |-- context/                (AuthContext.jsx)
+|       |-- components/             (Reusable UI components)
+|       |-- hooks/                  (Custom React hooks)
+|       |-- utils/                  (roleHelpers and utilities)
+|       |-- config/                 (constants.js)
+|
+|-- server/                         (Node.js / Express backend)
+    |-- app.js                      (Express app setup and route mounting)
+    |-- server.js                   (HTTP server entry point)
+    |-- controllers/                (auth, user, department, attendance, leave,
+    |                                shift, schedule, payroll, notification,
+    |                                report)
+    |-- models/                     (User, Department, Attendance, Leave, Shift,
+    |                                Schedule, Payroll, Notification)
+    |-- routes/                     (Express route definitions per module)
+    |-- middleware/                 (auth.middleware.js, role.middleware.js)
+    |-- services/                   (auth.service.js, payroll.service.js,
+    |                                notification.service.js)
+    |-- validators/                 (auth, user, department, attendance, leave,
+    |                                shift, schedule, payroll validators)
+    |-- seed/                       (seed.js — creates default test accounts)
+    |-- migrate/                    (migrate_earned_leave.js)
+    |-- tests/                      (7 test files)
+    |-- config/                     (Database connection setup)
+
+
+--------------------------------------------------------------------------------
+10. TESTING
+--------------------------------------------------------------------------------
+
+The project includes seven test files covering all major system flows:
+
+File                        | Coverage
+----------------------------|--------------------------------------------------
+attendance_leave.test.js    | Attendance and leave interaction logic (Jest)
+auth_rbac.test.js           | Authentication and role-based access control (Jest)
+payroll.test.js             | Payroll calculation correctness (Jest)
+shift_schedule.test.js      | Shift assignment and schedule management (Jest)
+test_attendance_leave.js    | Custom integration tests for attendance/leave flow
+test_master_flow.js         | End-to-end flow from login to payroll
+test_payroll_logic.js       | Unit tests for payroll computation service
+
+Default Test Credentials (created by seed.js):
+  Admin : Employee ID = BIT-ADM-001 / Password = Admin@123
+  HOD   : Employee ID = BIT-HOD-001 / Password = Hod@123
+  Staff : Employee ID = BIT-NTS-001 / Password = Staff@123
+
+
+--------------------------------------------------------------------------------
+11. SECURITY CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+- Passwords are hashed using bcryptjs with a salt round of 12 before storage.
+- JWT tokens expire after 7 days and must be sent in the Authorization header.
+- The password field is excluded from all database query results by default.
+- Role-based middleware (authorize) blocks unauthorized role access on every
+  protected route.
+- Department isolation guard ensures HODs and Staff cannot access or modify
+  data outside their own department.
+- User access guard prevents Staff from viewing or modifying other users' data.
+- Input on all API routes is validated and sanitized through express-validator
+  before reaching the controller layer.
+- CORS is configured to accept requests only from the known client origin.
+
+
+--------------------------------------------------------------------------------
+12. CONCLUSION
+--------------------------------------------------------------------------------
+
+The BIT Non-Teaching Staff Portal successfully digitizes the core HR operations
+for non-teaching staff at Bannari Amman Institute of Technology. The system
+provides a secure, role-scoped, and centralized platform that eliminates manual
+record-keeping for attendance, leave, shifts, schedules, and payroll. The
+modular MERN stack architecture ensures that each feature area is independently
+maintained, validated, tested, and extensible.
+
+Key achievements:
+- Three-role access control system with department-level data isolation.
+- Real-time leave balance tracking with reservation and release logic.
+- Automated server-side payroll calculation with a ₹40,000 salary cap.
+- In-app notification system for key HR events.
+- Comprehensive reports for each user role.
+- Input validation on all API routes.
+- Full test coverage across authentication, attendance, leave, schedule,
+  and payroll modules.
+
+Future Enhancements:
+- Email/SMS notifications in addition to in-app notifications.
+- PDF generation for payslips.
+- Multi-shift assignment per day.
+- Holiday calendar management by Admin.
+- Mobile-responsive PWA version.
+- Audit log for all admin actions.
+
+
+--------------------------------------------------------------------------------
+13. REFERENCES
+--------------------------------------------------------------------------------
+
+- Node.js Documentation          : https://nodejs.org/en/docs
+- Express.js Documentation       : https://expressjs.com
+- MongoDB Documentation          : https://www.mongodb.com/docs
+- Mongoose Documentation         : https://mongoosejs.com/docs
+- React Documentation            : https://react.dev
+- Vite Documentation             : https://vitejs.dev
+- Tailwind CSS Documentation     : https://tailwindcss.com/docs
+- Axios Documentation            : https://axios-http.com/docs/intro
+- JSON Web Tokens (JWT)          : https://jwt.io
+- bcryptjs                       : https://github.com/dcodeIO/bcrypt.js
+- express-validator              : https://express-validator.github.io/docs
+- React Router DOM               : https://reactrouter.com/en/main
+
+================================================================================
+                         END OF PROJECT REPORT
+================================================================================

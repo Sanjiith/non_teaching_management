@@ -12,6 +12,8 @@ const statusConfig = {
   'Weekly Off': { cls: 'badge-neutral', icon: 'event_busy' },
   Late:         { cls: 'badge-warning', icon: 'schedule' },
   'Half-Day':   { cls: 'badge-warning', icon: 'timelapse' },
+  'Pending Check-In': { cls: 'badge-warning', icon: 'pending_actions' },
+  'Not Checked In':   { cls: 'badge-warning', icon: 'pending_actions' },
   // Leave
   Pending:    { cls: 'badge-warning', icon: 'pending' },
   Approved:   { cls: 'badge-success', icon: 'task_alt' },

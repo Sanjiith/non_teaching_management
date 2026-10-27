@@ -8,6 +8,11 @@ const {
   getStaffAttendance,
   markOrCorrectAttendance,
   getAttendanceStats,
+  checkIn,
+  getTodayAttendance,
+  getDailyStaffAttendance,
+  getAttendanceConfigEndpoint,
+  updateAttendanceConfigEndpoint,
 } = require('../controllers/attendance.controller');
 
 const { protect } = require('../middleware/auth.middleware');
@@ -16,6 +21,31 @@ const {
   markAttendanceValidation,
   handleValidationErrors,
 } = require('../validators/attendance.validator');
+
+// @route   POST /api/attendance/check-in
+// @desc    Staff Check-In (Biometric alternative)
+// @access  Private (Staff, Non-Teaching Staff, HOD)
+router.post('/check-in', protect, checkIn);
+
+// @route   GET /api/attendance/today
+// @desc    Get current user's today attendance status & check-in time
+// @access  Private
+router.get('/today', protect, getTodayAttendance);
+
+// @route   GET /api/attendance/daily-staff
+// @desc    Get daily attendance for non-teaching staff (HOD: own dept, Admin: all depts)
+// @access  Private (HOD, Admin)
+router.get('/daily-staff', protect, authorize('HOD', 'Admin'), getDailyStaffAttendance);
+
+// @route   GET /api/attendance/config
+// @desc    Get attendance configuration (check-in window, timezone)
+// @access  Private
+router.get('/config', protect, getAttendanceConfigEndpoint);
+
+// @route   PUT /api/attendance/config
+// @desc    Update attendance configuration
+// @access  Private (Admin)
+router.put('/config', protect, authorize('Admin'), updateAttendanceConfigEndpoint);
 
 // @route   GET /api/attendance/my
 // @desc    Get current user's attendance records and statistics

@@ -25,6 +25,7 @@ import AdminDepartmentsPage from '../pages/admin/AdminDepartmentsPage';
 
 // HOD pages
 import HODDashboard from '../pages/hod/HODDashboard';
+import HODStaffPage from '../pages/hod/HODStaffPage';
 import HODAttendancePage from '../pages/hod/HODAttendancePage';
 import HODLeavePage from '../pages/hod/HODLeavePage';
 import HODSchedulePage from '../pages/hod/HODSchedulePage';
@@ -96,7 +97,7 @@ const AppRoutes = () => {
       >
         <Route index element={<Navigate to={ROUTES.HOD_DASHBOARD} replace />} />
         <Route path="dashboard"  element={<HODDashboard />} />
-        <Route path="staff"      element={<ComingSoon title="Department Staff" />} />
+        <Route path="staff"      element={<HODStaffPage />} />
         <Route path="attendance" element={<HODAttendancePage />} />
         <Route path="leave"      element={<HODLeavePage />} />
         <Route path="schedule"   element={<HODSchedulePage />} />

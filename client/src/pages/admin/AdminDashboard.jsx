@@ -30,14 +30,6 @@ const SectionCard = ({ title, children, action }) => (
   </div>
 );
 
-const deptStats = [
-  { dept: 'CSE', total: 24, present: 22, absent: 1, leave: 1 },
-  { dept: 'ECE', total: 18, present: 16, absent: 2, leave: 0 },
-  { dept: 'ME',  total: 15, present: 13, absent: 1, leave: 1 },
-  { dept: 'CE',  total: 12, present: 12, absent: 0, leave: 0 },
-  { dept: 'IT',  total: 20, present: 18, absent: 1, leave: 1 },
-];
-
 const AdminDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -47,7 +39,10 @@ const AdminDashboard = () => {
     presentToday: 0,
     absentToday: 0,
     onLeaveToday: 0,
+    staffOnLeaveCount: 0,
+    pendingLeavesCount: 0,
     attendanceRateToday: 0,
+    departmentBreakdown: [],
   });
   const [recentLeaves, setRecentLeaves] = useState([]);
   const [systemActivity, setSystemActivity] = useState([]);
@@ -147,7 +142,7 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-md">
         <KPICard
           label="Total Staff"
-          value={stats.totalStaff || 89}
+          value={stats.totalStaff || 0}
           icon="groups"
           sub="All departments"
         />
@@ -167,7 +162,7 @@ const AdminDashboard = () => {
         />
         <KPICard
           label="Pending Leaves"
-          value={recentLeaves.filter((l) => l.status === 'Pending').length}
+          value={stats.pendingLeavesCount || 0}
           icon="pending_actions"
           sub="Awaiting review"
           valueColor="text-amber-600"
@@ -312,29 +307,37 @@ const AdminDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {deptStats.map((row) => {
-                const pct = Math.round((row.present / row.total) * 100);
-                return (
-                  <tr key={row.dept}>
-                    <td><span className="badge-neutral">{row.dept}</span></td>
-                    <td>{row.total}</td>
-                    <td className="text-emerald-700 font-medium">{row.present}</td>
-                    <td className="text-red-700 font-medium">{row.absent}</td>
-                    <td className="text-amber-700 font-medium">{row.leave}</td>
-                    <td>
-                      <div className="flex items-center gap-sm">
-                        <div className="flex-1 bg-surface-container-high rounded-full h-1.5">
-                          <div
-                            className={`h-1.5 rounded-full ${pct >= 90 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500'}`}
-                            style={{ width: `${pct}%` }}
-                          />
+              {(!stats.departmentBreakdown || stats.departmentBreakdown.length === 0) ? (
+                <tr>
+                  <td colSpan={6} className="text-secondary text-center py-lg font-body-sm">
+                    No department attendance records found for today.
+                  </td>
+                </tr>
+              ) : (
+                stats.departmentBreakdown.map((row) => {
+                  const pct = row.total > 0 ? Math.round((row.present / row.total) * 100) : 0;
+                  return (
+                    <tr key={row.dept}>
+                      <td><span className="badge-neutral">{row.dept}</span></td>
+                      <td>{row.total}</td>
+                      <td className="text-emerald-700 font-medium">{row.present}</td>
+                      <td className="text-red-700 font-medium">{row.absent}</td>
+                      <td className="text-amber-700 font-medium">{row.leave}</td>
+                      <td>
+                        <div className="flex items-center gap-sm">
+                          <div className="flex-1 bg-surface-container-high rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${pct >= 90 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="font-label-md text-label-md text-secondary w-10 text-right">{pct}%</span>
                         </div>
-                        <span className="font-label-md text-label-md text-secondary w-10 text-right">{pct}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

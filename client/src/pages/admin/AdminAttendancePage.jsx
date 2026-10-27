@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getAllAttendance, markOrCorrectAttendance } from '../../services/attendance.service';
 import { getAdminAttendanceReport } from '../../services/report.service';
 import { exportCSV, getAttendanceRateColor } from '../../utils/exportCSV';
+import { consolidateAttendanceRecords } from '../../utils/attendanceHelper';
 
 const MONTHS = [
   { value: '', label: 'All Months' },
@@ -30,7 +31,11 @@ const AdminAttendancePage = () => {
     setLoading(true);
     try {
       const [listData, reportData] = await Promise.all([
-        getAllAttendance({ status: statusFilter || undefined }),
+        getAllAttendance({
+          status: statusFilter || undefined,
+          month: selectedMonth || undefined,
+          year: selectedYear || undefined,
+        }),
         getAdminAttendanceReport({
           month: selectedMonth || undefined,
           year: selectedYear || undefined,
@@ -50,17 +55,32 @@ const AdminAttendancePage = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const displayRecords = useMemo(() => consolidateAttendanceRecords(records), [records]);
+
   const handleCorrectSubmit = async (e) => {
     e.preventDefault();
     if (!correctingRecord) return;
     setSubmitting(true);
     try {
-      await markOrCorrectAttendance({
-        user: correctingRecord.user?._id || correctingRecord.user,
-        date: correctingRecord.date,
-        status: newStatus,
-        remarks: remarks || 'Corrected by Admin',
-      });
+      if (correctingRecord.records && correctingRecord.records.length > 1) {
+        await Promise.all(
+          correctingRecord.records.map((rec) =>
+            markOrCorrectAttendance({
+              user: rec.user?._id || rec.user,
+              date: rec.date,
+              status: newStatus,
+              remarks: remarks || 'Corrected by Admin',
+            })
+          )
+        );
+      } else {
+        await markOrCorrectAttendance({
+          user: correctingRecord.user?._id || correctingRecord.user,
+          date: correctingRecord.date,
+          status: newStatus,
+          remarks: remarks || 'Corrected by Admin',
+        });
+      }
       setCorrectingRecord(null);
       setRemarks('');
       fetchData();
@@ -76,12 +96,12 @@ const AdminAttendancePage = () => {
       { key: 'employee', label: 'Employee', getValue: (r) => r.user?.name || '—' },
       { key: 'employeeId', label: 'Employee ID', getValue: (r) => r.user?.employeeId || '—' },
       { key: 'department', label: 'Department', getValue: (r) => r.user?.department?.code || '—' },
-      { key: 'date', label: 'Date', getValue: (r) => new Date(r.date).toLocaleDateString('en-IN') },
+      { key: 'date', label: 'Date', getValue: (r) => r.dateDisplay || new Date(r.date).toLocaleDateString('en-IN') },
       { key: 'status', label: 'Status', getValue: (r) => r.status },
-      { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarks || '' },
+      { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarksDisplay || r.remarks || '' },
     ];
     const period = selectedMonth ? `${MONTHS.find(m => m.value === selectedMonth)?.label}-${selectedYear}` : selectedYear;
-    exportCSV(records, `Attendance_Report_${period}`, columns);
+    exportCSV(displayRecords, `Attendance_Report_${period}`, columns);
   };
 
   const rateColor = reportStats ? getAttendanceRateColor(reportStats.attendanceRate) : 'text-on-surface';
@@ -198,7 +218,7 @@ const AdminAttendancePage = () => {
             <div className="flex justify-center py-xl">
               <span className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : records.length === 0 ? (
+          ) : displayRecords.length === 0 ? (
             <p className="text-secondary text-center py-xl font-body-sm">No attendance records found.</p>
           ) : (
             <table className="bit-table">
@@ -213,7 +233,7 @@ const AdminAttendancePage = () => {
                 </tr>
               </thead>
               <tbody>
-                {records.map((r) => {
+                {displayRecords.map((r) => {
                   const dateStr = new Date(r.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
                   return (
                     <tr key={r._id}>
@@ -224,9 +244,20 @@ const AdminAttendancePage = () => {
                         </div>
                       </td>
                       <td><span className="badge-neutral">{r.user?.department?.code || r.user?.department?.name || '—'}</span></td>
-                      <td className="text-secondary font-mono text-xs">{dateStr}</td>
+                      <td className="text-secondary font-mono text-xs whitespace-nowrap">
+                        {r.dateDisplay || dateStr}
+                      </td>
                       <td><StatusBadge status={r.status} /></td>
-                      <td className="text-secondary text-sm">{r.remarks || '—'}</td>
+                      <td className="text-secondary text-sm">
+                        <div className="flex items-center gap-xs flex-wrap">
+                          <span>{r.remarksDisplay || r.remarks || '—'}</span>
+                          {r.isGrouped && r.totalDays > 1 && (
+                            <span className="badge-neutral text-[11px] py-0 px-1.5 font-medium text-outline">
+                              {r.duration}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <button
                           onClick={() => { setCorrectingRecord(r); setNewStatus(r.status === 'On-Leave' ? 'Leave' : r.status); setRemarks(r.remarks || ''); }}
@@ -250,7 +281,10 @@ const AdminAttendancePage = () => {
           <div className="bg-surface-container-lowest border border-outline-variant rounded-lg p-lg max-w-md w-full shadow-lg">
             <h3 className="font-headline-sm text-headline-sm text-on-surface mb-sm">Admin Attendance Correction</h3>
             <p className="font-body-sm text-secondary mb-md">
-              Correcting for <strong className="text-on-surface">{correctingRecord.user?.name}</strong> on {new Date(correctingRecord.date).toLocaleDateString('en-IN')}
+              Correcting for <strong className="text-on-surface">{correctingRecord.user?.name}</strong>{' '}
+              {correctingRecord.dateDisplay
+                ? `for ${correctingRecord.dateDisplay}${correctingRecord.duration ? ` (${correctingRecord.duration})` : ''}`
+                : `on ${new Date(correctingRecord.date).toLocaleDateString('en-IN')}`}
             </p>
             <form onSubmit={handleCorrectSubmit} className="space-y-md">
               <div>

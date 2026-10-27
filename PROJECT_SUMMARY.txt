@@ -1,0 +1,190 @@
+﻿BIT NON-TEACHING STAFF PORTAL
+================================
+Project: Full-Stack MERN Web Application
+Institution: Bannari Amman Institute of Technology (BIT Sathy)
+Purpose: Digital management system for non-teaching staff operations
+
+
+TECH STACK
+----------
+Frontend  : React 18 + Vite
+Styling   : Tailwind CSS + Material UI (MUI)
+Backend   : Node.js + Express.js
+Database  : MongoDB + Mongoose
+Auth      : JWT (Bearer Token)
+API Client: Axios
+
+
+USER ROLES
+----------
+1. Admin                - Full system access
+2. HOD                  - Department-scoped access
+3. Non-Teaching Staff   - Personal portal access
+
+
+IMPLEMENTED FEATURES
+--------------------
+
+1. AUTHENTICATION
+   - Login using Employee ID and Password
+   - JWT-based authentication (token stored client-side)
+   - Protected routes based on user role
+   - Logout functionality
+   - Auth middleware to validate tokens on every protected API request
+   - Role middleware to restrict access by role (Admin, HOD, Staff)
+
+2. USER / STAFF MANAGEMENT
+   - Admin can create, view, update, and delete staff records
+   - Staff profiles include: name, employee ID, department, role, designation, contact info
+   - HOD can view staff within their department
+   - Staff can view and update their own profile
+
+3. DEPARTMENT MANAGEMENT
+   - Admin can create, update, and delete departments
+   - Each department has a name and assigned HOD
+   - Staff are linked to departments
+
+4. ATTENDANCE MANAGEMENT
+   - Staff can mark attendance (clock-in and clock-out)
+   - Admin and HOD can view attendance records
+   - Attendance is recorded per day with timestamps
+   - Monthly attendance summaries available
+   - Attendance data feeds into payroll calculation
+
+5. LEAVE MANAGEMENT
+   - Staff can apply for leave (type, date range, reason)
+   - Leave types: Casual Leave, Medical Leave, Earned Leave, etc.
+   - HOD can approve or reject leave for their department
+   - Admin can approve or reject any leave
+   - Leave overlap detection: prevents overlapping date ranges
+   - Leave balance tracking per staff member
+   - Earned leave migration script to initialize balances
+
+6. SHIFT MANAGEMENT
+   - Admin can create and manage shift definitions (Morning, Evening, etc.)
+   - Shifts include start time, end time, and label
+   - Staff can be assigned to shifts
+
+7. SCHEDULE MANAGEMENT
+   - Admin and HOD can create weekly/daily schedules for staff
+   - Schedules link staff to shifts on specific dates
+   - Schedule view available per department
+
+8. PAYROLL MANAGEMENT
+   - Payroll computed based on attendance records
+   - Deductions applied for absences or unapproved leaves
+   - Payslip generation per staff member per month
+   - Admin can view, generate, and manage payroll
+   - Payroll model stores: basic pay, deductions, net pay, month, year, status
+   - Payroll service handles all business logic separately from the controller
+
+9. NOTIFICATIONS
+   - In-app notifications for leave approvals/rejections
+   - Notifications stored in the database, fetched per user
+   - Notification service handles creation and retrieval logic
+
+10. REPORTS
+    - Admin can generate attendance reports (per staff, per department, per month)
+    - Admin can generate payroll reports
+    - Report controller handles data aggregation and response formatting
+
+11. DATABASE SEEDING
+    - Seed script creates default users for testing:
+        Admin : BIT-ADM-001 / Admin@123
+        HOD   : BIT-HOD-001 / Hod@123
+        Staff : BIT-NTS-001 / Staff@123
+
+12. MIGRATIONS
+    - Earned leave migration script to backfill leave balance for existing users
+
+13. TESTING
+    - test_attendance_leave.js  - Tests attendance and leave interaction logic
+    - test_master_flow.js       - End-to-end flow from login to payroll
+    - test_payroll_logic.js     - Unit tests for payroll computation logic
+
+
+PROJECT STRUCTURE OVERVIEW
+--------------------------
+
+client/src/
+  pages/admin/  - AdminDashboard, AttendancePage, LeavePage, PayrollPage,
+                  ShiftPage, StaffPage, DepartmentsPage
+  pages/hod/    - HOD views for leave approval, attendance, schedules
+  pages/staff/  - Staff profile, leave application, attendance, payroll view
+  pages/auth/   - Login page
+  layouts/      - Role-specific layout wrappers (Admin, HOD, Staff, Auth)
+  routes/       - AppRoutes with ProtectedRoute component
+  services/     - auth.service.js, api.service.js, notification.service.js
+  context/      - AuthContext for global auth state
+  components/   - Reusable UI components
+
+server/
+  controllers/  - auth, user, department, attendance, leave,
+                  shift, schedule, payroll, notification, report
+  models/       - User, Department, Attendance, Leave, Shift,
+                  Schedule, Payroll, Notification
+  routes/       - Express route definitions per module
+  middleware/   - auth.middleware.js (JWT verify), role.middleware.js (role check)
+  services/     - payroll.service.js, notification.service.js (business logic)
+  validators/   - Input validation for auth and leave requests
+  seed/         - seed.js (database seeder)
+  migrate/      - migrate_earned_leave.js
+  tests/        - test_attendance_leave.js, test_master_flow.js, test_payroll_logic.js
+  config/       - Database connection setup
+
+
+API MODULES
+-----------
+POST   /api/auth/login           - Staff login
+GET    /api/auth/me              - Get logged-in user info
+POST   /api/auth/logout          - Logout
+GET    /api/users                - List all staff (Admin)
+POST   /api/users                - Create staff (Admin)
+PUT    /api/users/:id            - Update staff
+DELETE /api/users/:id            - Delete staff (Admin)
+GET    /api/departments          - List departments
+POST   /api/departments          - Create department (Admin)
+GET    /api/attendance           - View attendance records
+POST   /api/attendance/checkin   - Mark clock-in
+POST   /api/attendance/checkout  - Mark clock-out
+GET    /api/leave                - View leave applications
+POST   /api/leave                - Apply for leave (Staff)
+PUT    /api/leave/:id/approve    - Approve leave (HOD/Admin)
+PUT    /api/leave/:id/reject     - Reject leave (HOD/Admin)
+GET    /api/shifts               - List shifts
+POST   /api/shifts               - Create shift (Admin)
+GET    /api/schedules            - View schedules
+POST   /api/schedules            - Create schedule (Admin/HOD)
+GET    /api/payroll              - View payroll records
+POST   /api/payroll/generate     - Generate payroll (Admin)
+GET    /api/notifications        - Get notifications for logged-in user
+GET    /api/reports/attendance   - Attendance report (Admin)
+GET    /api/reports/payroll      - Payroll report (Admin)
+GET    /api/health               - Server health check
+
+
+LATEST CHANGES (commit: 7c1a5c8)
+----------------------------------
+- Fixed leave overlap bug (prevents duplicate/overlapping leave date ranges)
+- Added AdminDepartmentsPage and AdminStaffPage to frontend
+- Added earned leave migration script
+- Added 3 test files for attendance, leave, and payroll logic
+- Updated payroll model, user model, and payroll service
+
+
+ENVIRONMENT VARIABLES
+---------------------
+Server:
+  PORT=5000
+  MONGODB_URI=mongodb://localhost:27017/bit_portal
+  JWT_SECRET=your_jwt_secret
+  JWT_EXPIRES_IN=7d
+  CLIENT_URL=http://localhost:5173
+
+Client:
+  VITE_API_URL=http://localhost:5000/api
+  VITE_APP_NAME=BIT Non-Teaching Staff Portal
+
+
+GitHub Repository: https://github.com/Sanjiith/non_teaching_management
+License: Internal use - Bannari Amman Institute of Technology, Sathyamangalam

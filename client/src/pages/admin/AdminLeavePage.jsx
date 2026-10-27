@@ -19,7 +19,11 @@ const AdminLeavePage = () => {
         getAdminLeaveReport({ status: statusFilter || undefined }),
       ]);
       setLeaves(listData.leaves || []);
-      if (reportData) setLeaveStats(reportData.stats);
+      if (reportData && reportData.stats) {
+        setLeaveStats(reportData.stats);
+      } else if (listData.stats) {
+        setLeaveStats(listData.stats);
+      }
     } catch (err) {
       console.error('Error fetching admin leaves:', err);
     } finally {

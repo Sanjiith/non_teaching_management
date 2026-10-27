@@ -25,7 +25,32 @@ export const markOrCorrectAttendance = async (data) => {
   return response.data.data;
 };
 
-export const getAttendanceStats = async () => {
-  const response = await api.get('/attendance/stats');
+export const getAttendanceStats = async (params = {}) => {
+  const response = await api.get('/attendance/stats', { params });
+  return response.data.data;
+};
+
+export const staffCheckIn = async () => {
+  const response = await api.post('/attendance/check-in');
+  return response.data;
+};
+
+export const getTodayAttendance = async () => {
+  const response = await api.get('/attendance/today');
+  return response.data.data;
+};
+
+export const getDailyStaffAttendance = async (params = {}) => {
+  const response = await api.get('/attendance/daily-staff', { params });
+  return response.data.data;
+};
+
+export const getAttendanceConfig = async () => {
+  const response = await api.get('/attendance/config');
+  return response.data.data;
+};
+
+export const updateAttendanceConfig = async (data) => {
+  const response = await api.put('/attendance/config', data);
   return response.data.data;
 };

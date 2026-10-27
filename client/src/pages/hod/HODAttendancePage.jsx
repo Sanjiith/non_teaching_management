@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import { getDepartmentAttendance, markOrCorrectAttendance } from '../../services/attendance.service';
 import { getHODAttendanceReport } from '../../services/report.service';
 import { exportCSV, getAttendanceRateColor } from '../../utils/exportCSV';
+import { consolidateAttendanceRecords } from '../../utils/attendanceHelper';
 
 const HODAttendancePage = () => {
   const { user } = useAuth();
@@ -23,7 +24,11 @@ const HODAttendancePage = () => {
     setLoading(true);
     try {
       const [listData, reportData] = await Promise.all([
-        getDepartmentAttendance({ status: statusFilter || undefined }),
+        getDepartmentAttendance({
+          status: statusFilter || undefined,
+          month: selectedMonth || undefined,
+          year: selectedYear || undefined,
+        }),
         getHODAttendanceReport({ month: selectedMonth || undefined, year: selectedYear }),
       ]);
       setRecords(listData.records || []);
@@ -39,18 +44,35 @@ const HODAttendancePage = () => {
     fetchAttendance();
   }, [fetchAttendance]);
 
+  // Consolidate multi-day leaves into single entries
+  const displayRecords = useMemo(() => consolidateAttendanceRecords(records), [records]);
+
   const handleCorrectSubmit = async (e) => {
     e.preventDefault();
     if (!correctingRecord) return;
 
     setSubmitting(true);
     try {
-      await markOrCorrectAttendance({
-        user: correctingRecord.user?._id || correctingRecord.user,
-        date: correctingRecord.date,
-        status: newStatus,
-        remarks: remarks || 'Corrected by HOD',
-      });
+      if (correctingRecord.records && correctingRecord.records.length > 1) {
+        // Update all individual attendance records belonging to this leave
+        await Promise.all(
+          correctingRecord.records.map((rec) =>
+            markOrCorrectAttendance({
+              user: rec.user?._id || rec.user,
+              date: rec.date,
+              status: newStatus,
+              remarks: remarks || 'Corrected by HOD',
+            })
+          )
+        );
+      } else {
+        await markOrCorrectAttendance({
+          user: correctingRecord.user?._id || correctingRecord.user,
+          date: correctingRecord.date,
+          status: newStatus,
+          remarks: remarks || 'Corrected by HOD',
+        });
+      }
       setCorrectingRecord(null);
       setRemarks('');
       fetchAttendance();
@@ -60,6 +82,10 @@ const HODAttendancePage = () => {
       setSubmitting(false);
     }
   };
+
+  const onLeaveCount = reportStats?.Leave !== undefined
+    ? reportStats.Leave
+    : displayRecords.filter((r) => r.status === 'Leave' || r.status === 'On-Leave').length;
 
   return (
     <div className="space-y-lg">
@@ -93,11 +119,11 @@ const HODAttendancePage = () => {
               const cols = [
                 { key: 'employee', label: 'Employee', getValue: (r) => r.user?.name || '—' },
                 { key: 'employeeId', label: 'Employee ID', getValue: (r) => r.user?.employeeId || '—' },
-                { key: 'date', label: 'Date', getValue: (r) => new Date(r.date).toLocaleDateString('en-IN') },
+                { key: 'date', label: 'Date', getValue: (r) => r.dateDisplay || new Date(r.date).toLocaleDateString('en-IN') },
                 { key: 'status', label: 'Status', getValue: (r) => r.status },
-                { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarks || '' },
+                { key: 'remarks', label: 'Remarks', getValue: (r) => r.remarksDisplay || r.remarks || '' },
               ];
-              exportCSV(records, `Dept_Attendance_${selectedYear}`, cols);
+              exportCSV(displayRecords, `Dept_Attendance_${selectedYear}`, cols);
             }}
             className="btn-secondary"
           >
@@ -112,7 +138,7 @@ const HODAttendancePage = () => {
           {[
             { label: 'Present', value: reportStats.Present || 0, color: 'text-emerald-600' },
             { label: 'Absent', value: reportStats.Absent || 0, color: 'text-red-600' },
-            { label: 'On Leave', value: (reportStats.Leave || 0) + (reportStats['On-Leave'] || 0), color: 'text-amber-600' },
+            { label: 'On Leave', value: onLeaveCount, color: 'text-amber-600' },
             { label: 'Holiday', value: reportStats.Holiday || 0, color: 'text-blue-600' },
             { label: 'Weekly Off', value: reportStats['Weekly Off'] || 0, color: 'text-secondary' },
             { label: 'Attendance %', value: `${reportStats.attendanceRate}%`, color: getAttendanceRateColor(reportStats.attendanceRate) },
@@ -132,7 +158,7 @@ const HODAttendancePage = () => {
             <div className="flex justify-center py-xl">
               <span className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : records.length === 0 ? (
+          ) : displayRecords.length === 0 ? (
             <p className="text-secondary text-center py-xl font-body-sm">
               No attendance records found.
             </p>
@@ -149,16 +175,27 @@ const HODAttendancePage = () => {
                 </tr>
               </thead>
               <tbody>
-                {records.map((r) => {
+                {displayRecords.map((r) => {
                   const d = new Date(r.date);
                   const dateStr = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
                   return (
                     <tr key={r._id}>
                       <td className="font-medium">{r.user?.name}</td>
                       <td className="text-secondary">{r.user?.designation || 'Staff'}</td>
-                      <td className="text-secondary font-mono text-xs">{dateStr}</td>
+                      <td className="text-secondary font-mono text-xs whitespace-nowrap">
+                        {r.dateDisplay || dateStr}
+                      </td>
                       <td><StatusBadge status={r.status} /></td>
-                      <td className="text-secondary text-sm">{r.remarks || '—'}</td>
+                      <td className="text-secondary text-sm">
+                        <div className="flex items-center gap-xs flex-wrap">
+                          <span>{r.remarksDisplay || r.remarks || '—'}</span>
+                          {r.isGrouped && r.totalDays > 1 && (
+                            <span className="badge-neutral text-[11px] py-0 px-1.5 font-medium text-outline">
+                              {r.duration}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <button
                           onClick={() => {
@@ -186,7 +223,10 @@ const HODAttendancePage = () => {
           <div className="bg-surface-container-lowest border border-outline-variant rounded-lg p-lg max-w-md w-full shadow-lg">
             <h3 className="font-headline-sm text-headline-sm text-on-surface mb-sm">Correct Attendance</h3>
             <p className="font-body-sm text-secondary mb-md">
-              Updating record for <strong className="text-on-surface">{correctingRecord.user?.name}</strong> on {new Date(correctingRecord.date).toLocaleDateString('en-IN')}
+              Updating record for <strong className="text-on-surface">{correctingRecord.user?.name}</strong>{' '}
+              {correctingRecord.dateDisplay
+                ? `for ${correctingRecord.dateDisplay}${correctingRecord.duration ? ` (${correctingRecord.duration})` : ''}`
+                : `on ${new Date(correctingRecord.date).toLocaleDateString('en-IN')}`}
             </p>
 
             <form onSubmit={handleCorrectSubmit} className="space-y-md">

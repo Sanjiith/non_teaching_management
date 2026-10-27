@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
-import { getDepartmentAttendance } from '../../services/attendance.service';
+import { getDepartmentAttendance, getAttendanceStats } from '../../services/attendance.service';
 import { getDepartmentLeaves, approveLeave, rejectLeave } from '../../services/leave.service';
 import { getDepartmentSchedules } from '../../services/schedule.service';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../config/constants';
+import { consolidateAttendanceRecords } from '../../utils/attendanceHelper';
 
 const KPICard = ({ label, value, icon, sub, valueColor = 'text-on-surface' }) => (
   <div className="kpi-card">
@@ -28,21 +29,31 @@ const HODDashboard = () => {
   const [pendingLeaves, setPendingLeaves] = useState([]);
   const [deptSchedules, setDeptSchedules] = useState([]);
   const [deptStaffCount, setDeptStaffCount] = useState(0);
+  const [hodStats, setHodStats] = useState({
+    totalStaff: 0,
+    presentToday: 0,
+    absentToday: 0,
+    onLeaveToday: 0,
+    staffOnLeaveCount: 0,
+    pendingLeavesCount: 0,
+  });
   const [processingId, setProcessingId] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
 
   const loadData = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      const [attData, leavesData, schedData] = await Promise.all([
+      const [attData, leavesData, schedData, statsData] = await Promise.all([
         getDepartmentAttendance(),
         getDepartmentLeaves({ status: 'Pending' }),
         getDepartmentSchedules({ startDate: today, endDate: today }),
+        getAttendanceStats(),
       ]);
       setStaffAttendance(attData.records || []);
       setDeptStaffCount(attData.departmentStaffCount || (attData.records || []).length);
       setPendingLeaves(leavesData.leaves || []);
       setDeptSchedules(schedData || []);
+      if (statsData) setHodStats(statsData);
     } catch (err) {
       console.error('Failed to load HOD data:', err);
     }
@@ -51,6 +62,12 @@ const HODDashboard = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Consolidate multi-day leaves so they appear as single entries
+  const consolidatedAttendance = useMemo(
+    () => consolidateAttendanceRecords(staffAttendance),
+    [staffAttendance]
+  );
 
   const handleApprove = async (leaveId) => {
     setProcessingId(leaveId);
@@ -83,10 +100,14 @@ const HODDashboard = () => {
     }
   };
 
-  // KPI calculations
-  const presentCount = staffAttendance.filter((r) => r.status === 'Present').length;
-  const absentCount = staffAttendance.filter((r) => r.status === 'Absent').length;
-  const onLeaveCount = staffAttendance.filter((r) => r.status === 'Leave' || r.status === 'On-Leave').length;
+  // KPI calculations for Today
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayRecords = staffAttendance.filter((r) => {
+    const dStr = r.date ? new Date(r.date).toISOString().split('T')[0] : '';
+    return dStr === todayStr;
+  });
+  const presentCount = todayRecords.filter((r) => r.status === 'Present').length;
+  const absentCount = todayRecords.filter((r) => r.status === 'Absent').length;
 
   return (
     <div className="space-y-lg">
@@ -108,11 +129,12 @@ const HODDashboard = () => {
       </div>
 
       {/* ── KPIs ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
-        <KPICard label="Department Staff" value={deptStaffCount} icon="groups" sub="In your department" />
-        <KPICard label="Present Today" value={presentCount} icon="how_to_reg" sub="Staff on duty" valueColor="text-primary-container" />
-        <KPICard label="Absent" value={absentCount} icon="person_off" sub="Unexcused" valueColor="text-error" />
-        <KPICard label="Pending Leave" value={pendingLeaves.length} icon="pending_actions" sub="Awaiting approval" valueColor="text-amber-600" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-md">
+        <KPICard label="Department Staff" value={hodStats.totalStaff || deptStaffCount} icon="groups" sub="In your department" />
+        <KPICard label="Present Today" value={hodStats.presentToday ?? presentCount} icon="how_to_reg" sub="Staff on duty" valueColor="text-primary-container" />
+        <KPICard label="Absent" value={hodStats.absentToday ?? absentCount} icon="person_off" sub="Unexcused" valueColor="text-error" />
+        <KPICard label="On Leave" value={hodStats.onLeaveToday ?? 0} icon="flight_takeoff" sub="Approved leave" valueColor="text-amber-600" />
+        <KPICard label="Pending Leave" value={hodStats.pendingLeavesCount ?? pendingLeaves.length} icon="pending_actions" sub="Awaiting approval" valueColor="text-amber-600" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-md">
@@ -121,10 +143,10 @@ const HODDashboard = () => {
           <div className="bit-card">
             <div className="flex items-center justify-between mb-md">
               <h3 className="font-title-md text-title-md text-on-surface">Department Staff Attendance</h3>
-              <span className="text-xs text-secondary font-medium">{staffAttendance.length} records</span>
+              <span className="text-xs text-secondary font-medium">{consolidatedAttendance.length} records</span>
             </div>
             <div className="overflow-x-auto">
-              {staffAttendance.length === 0 ? (
+              {consolidatedAttendance.length === 0 ? (
                 <p className="text-secondary text-center py-xl font-body-sm">
                   No attendance records recorded for department staff today.
                 </p>
@@ -139,13 +161,20 @@ const HODDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {staffAttendance.map((s) => {
+                    {consolidatedAttendance.map((s) => {
                       const d = new Date(s.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
                       return (
                         <tr key={s._id}>
                           <td className="font-medium">{s.user?.name || 'Staff Member'}</td>
                           <td className="text-secondary">{s.user?.designation || 'Staff'}</td>
-                          <td className="text-secondary text-xs">{d}</td>
+                          <td className="text-secondary text-xs font-mono whitespace-nowrap">
+                            {s.dateDisplay || d}
+                            {s.isGrouped && s.totalDays > 1 && (
+                              <span className="badge-neutral text-[10px] py-0 px-1 ml-1 text-outline font-sans">
+                                {s.duration}
+                              </span>
+                            )}
+                          </td>
                           <td><StatusBadge status={s.status} /></td>
                         </tr>
                       );

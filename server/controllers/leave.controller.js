@@ -266,10 +266,24 @@ const getMyLeaves = async (req, res) => {
     const leaves = await query;
     const user = await User.findById(userId).select('leaveBalances');
 
+    const totalCount = await Leave.countDocuments(filter);
+    const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      Leave.countDocuments({ user: userId, status: 'Pending' }),
+      Leave.countDocuments({ user: userId, status: 'Approved' }),
+      Leave.countDocuments({ user: userId, status: 'Rejected' }),
+    ]);
+
     return sendSuccess(res, 200, 'Leaves fetched successfully', {
       count: leaves.length,
+      totalCount,
       leaves,
       leaveBalances: user?.leaveBalances,
+      stats: {
+        total: totalCount,
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+      },
     });
   } catch (error) {
     return sendError(res, 500, error.message);
@@ -305,10 +319,23 @@ const getDepartmentLeaves = async (req, res) => {
     if (limit) query = query.limit(parseInt(limit, 10));
 
     const leaves = await query;
+    const totalCount = await Leave.countDocuments(filter);
+    const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      Leave.countDocuments({ department: deptId, status: 'Pending' }),
+      Leave.countDocuments({ department: deptId, status: 'Approved' }),
+      Leave.countDocuments({ department: deptId, status: 'Rejected' }),
+    ]);
 
     return sendSuccess(res, 200, 'Department leaves fetched successfully', {
       count: leaves.length,
+      totalCount,
       leaves,
+      stats: {
+        total: totalCount,
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+      },
     });
   } catch (error) {
     return sendError(res, 500, error.message);
@@ -345,10 +372,23 @@ const getAllLeaves = async (req, res) => {
     if (limit) query = query.limit(parseInt(limit, 10));
 
     const leaves = await query;
+    const totalCount = await Leave.countDocuments(filter);
+    const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      Leave.countDocuments({ ...filter, status: 'Pending' }),
+      Leave.countDocuments({ ...filter, status: 'Approved' }),
+      Leave.countDocuments({ ...filter, status: 'Rejected' }),
+    ]);
 
     return sendSuccess(res, 200, 'All leaves fetched successfully', {
       count: leaves.length,
+      totalCount,
       leaves,
+      stats: {
+        total: totalCount,
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+      },
     });
   } catch (error) {
     return sendError(res, 500, error.message);

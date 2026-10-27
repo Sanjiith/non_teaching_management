@@ -15,39 +15,76 @@ const { sendSuccess, sendError } = require('../utils/responseHelper');
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 const buildDateRange = (month, year) => {
-  if (!month || !year) return null;
-  const m = parseInt(month, 10);
+  if (!year) return null;
   const y = parseInt(year, 10);
+  if (month) {
+    const m = parseInt(month, 10);
+    return {
+      $gte: new Date(Date.UTC(y, m - 1, 1)),
+      $lte: new Date(Date.UTC(y, m, 0, 23, 59, 59, 999)),
+    };
+  }
   return {
-    $gte: new Date(Date.UTC(y, m - 1, 1)),
-    $lte: new Date(Date.UTC(y, m, 0, 23, 59, 59, 999)),
+    $gte: new Date(Date.UTC(y, 0, 1)),
+    $lte: new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999)),
   };
 };
 
 const calcAttendanceStats = (records) => {
   const counts = { Present: 0, Absent: 0, Leave: 0, Holiday: 0, 'Weekly Off': 0, 'On-Leave': 0 };
+  const leaveGroups = new Set();
+  const staffOnLeaveSet = new Set();
+
   records.forEach((r) => {
-    if (counts[r.status] !== undefined) counts[r.status]++;
+    if (r.status === 'Leave' || r.status === 'On-Leave') {
+      const uid = r.user?._id?.toString() || r.user?.toString() || 'unknown';
+      staffOnLeaveSet.add(uid);
+      const match = r.remarks?.match(/Leave ID:\s*([a-f0-9]+)/i);
+      const leaveKey = match ? `${uid}_${match[1]}` : `${uid}_${r.date ? new Date(r.date).toISOString().split('T')[0] : Math.random()}`;
+      leaveGroups.add(leaveKey);
+    } else if (counts[r.status] !== undefined) {
+      counts[r.status]++;
+    }
   });
+
+  const totalLeaveDays = records.filter((r) => r.status === 'Leave' || r.status === 'On-Leave').length;
+  counts.Leave = leaveGroups.size;
+  counts['On-Leave'] = 0;
+
   const workable = counts.Present + counts.Absent;
-  const attendanceRate = workable > 0 ? Number(((counts.Present / workable) * 100).toFixed(1)) : 0;
-  return { ...counts, total: records.length, attendanceRate };
+  const attendanceRate = workable > 0 ? Number(((counts.Present / workable) * 100).toFixed(1)) : (records.length > 0 ? 100.0 : 0);
+  return {
+    ...counts,
+    total: records.length,
+    attendanceRate,
+    leaveApplicationsCount: leaveGroups.size,
+    staffOnLeaveCount: staffOnLeaveSet.size,
+    totalLeaveDays,
+  };
 };
 
 // ── ① ADMIN REPORTS ───────────────────────────────────────────────────────────
 
 /**
- * @desc   Admin: Attendance summary (all staff), optionally filtered by month/year/dept
+ * @desc   Admin: Attendance summary (all staff), optionally filtered by month/year/dept/date
  * @route  GET /api/reports/admin/attendance
  */
 exports.adminAttendanceReport = async (req, res) => {
   try {
-    const { month, year, department } = req.query;
+    const { month, year, date, department } = req.query;
     const filter = {};
-    if (month && year) filter.date = buildDateRange(month, year);
+    if (date) {
+      const d = new Date(date);
+      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 1);
+      filter.date = { $gte: start, $lt: end };
+    } else if (year) {
+      filter.date = buildDateRange(month, year);
+    }
 
     if (department) {
-      const deptUsers = await User.find({ department, role: 'Staff', isActive: true }).select('_id');
+      const deptUsers = await User.find({ department, role: { $in: ['Staff', 'Non-Teaching Staff'] }, isActive: true }).select('_id');
       filter.user = { $in: deptUsers.map((u) => u._id) };
     }
 
@@ -57,20 +94,53 @@ exports.adminAttendanceReport = async (req, res) => {
 
     const stats = calcAttendanceStats(records);
 
-    // Per-department breakdown
+    // Per-department breakdown initialized from all departments in the DB
+    const allDepartments = await Department.find({}).sort({ code: 1 });
+    const allDeptUsers = await User.find({ role: { $in: ['Staff', 'Non-Teaching Staff'] }, isActive: true }).select('_id department');
     const deptBreakdown = {};
-    records.forEach((r) => {
-      const code = r.user?.department?.code || 'UNKNOWN';
-      if (!deptBreakdown[code]) {
-        deptBreakdown[code] = { dept: code, name: r.user?.department?.name || code, Present: 0, Absent: 0, Leave: 0, Holiday: 0, 'Weekly Off': 0, total: 0 };
-      }
-      deptBreakdown[code].total++;
-      if (deptBreakdown[code][r.status] !== undefined) deptBreakdown[code][r.status]++;
+
+    allDepartments.forEach((d) => {
+      deptBreakdown[d.code] = {
+        dept: d.code,
+        name: d.name,
+        Present: 0,
+        Absent: 0,
+        Leave: 0,
+        Holiday: 0,
+        'Weekly Off': 0,
+        total: 0,
+        uniqueStaffOnLeave: new Set(),
+      };
     });
+
+    allDeptUsers.forEach((u) => {
+      const d = allDepartments.find((dep) => dep._id.toString() === u.department?.toString());
+      if (d && deptBreakdown[d.code]) {
+        deptBreakdown[d.code].total++;
+      }
+    });
+
+    records.forEach((r) => {
+      const code = r.user?.department?.code;
+      if (code && deptBreakdown[code]) {
+        if (r.status === 'Leave' || r.status === 'On-Leave') {
+          const uid = r.user?._id?.toString() || r.user?.toString();
+          if (uid) deptBreakdown[code].uniqueStaffOnLeave.add(uid);
+        } else if (deptBreakdown[code][r.status] !== undefined) {
+          deptBreakdown[code][r.status]++;
+        }
+      }
+    });
+
+    const breakdownList = Object.values(deptBreakdown).map((item) => ({
+      ...item,
+      Leave: item.uniqueStaffOnLeave.size,
+      uniqueStaffOnLeave: undefined,
+    }));
 
     return sendSuccess(res, 200, 'Attendance report retrieved', {
       stats,
-      departmentBreakdown: Object.values(deptBreakdown),
+      departmentBreakdown: breakdownList,
       records,
       totalRecords: records.length,
     });
@@ -86,11 +156,15 @@ exports.adminAttendanceReport = async (req, res) => {
  */
 exports.adminLeaveReport = async (req, res) => {
   try {
-    const { month, year, department, status } = req.query;
+    const { month, year, date, department, status } = req.query;
     const filter = {};
     if (status) filter.status = status;
 
-    if (month && year) {
+    if (date) {
+      const targetDate = new Date(date);
+      filter.fromDate = { $lte: targetDate };
+      filter.toDate = { $gte: targetDate };
+    } else if (month && year) {
       const range = buildDateRange(month, year);
       filter.$or = [{ fromDate: range }, { toDate: range }];
     }
@@ -103,16 +177,33 @@ exports.adminLeaveReport = async (req, res) => {
 
     const statusCounts = { Pending: 0, Approved: 0, Rejected: 0, Cancelled: 0 };
     const typeCounts = {};
-    let totalDays = 0;
+    const uniqueStaffSet = new Set();
+    const approvedStaffSet = new Set();
+    let totalApprovedDays = 0;
+    let totalCalendarDays = 0;
 
     leaves.forEach((l) => {
       statusCounts[l.status] = (statusCounts[l.status] || 0) + 1;
       typeCounts[l.type] = (typeCounts[l.type] || 0) + 1;
-      if (l.status === 'Approved') totalDays += l.totalDays || 0;
+      const uid = l.user?._id?.toString() || l.user?.toString();
+      if (uid) uniqueStaffSet.add(uid);
+      if (l.status === 'Approved') {
+        if (uid) approvedStaffSet.add(uid);
+        totalApprovedDays += l.totalDays || 0;
+      }
+      totalCalendarDays += l.totalDays || 0;
     });
 
     return sendSuccess(res, 200, 'Leave report retrieved', {
-      stats: { totalApplications: leaves.length, statusCounts, typeCounts, totalApprovedDays: totalDays },
+      stats: {
+        totalApplications: leaves.length,
+        totalStaffCount: uniqueStaffSet.size,
+        staffOnLeaveCount: approvedStaffSet.size,
+        statusCounts,
+        typeCounts,
+        totalApprovedDays,
+        totalCalendarDays,
+      },
       leaves,
     });
   } catch (err) {
@@ -212,7 +303,7 @@ exports.hodAttendanceReport = async (req, res) => {
     const { month, year } = req.query;
     const deptUsers = await User.find({ department: deptId, role: 'Staff', isActive: true }).select('_id');
     const filter = { user: { $in: deptUsers.map((u) => u._id) } };
-    if (month && year) filter.date = buildDateRange(month, year);
+    if (year) filter.date = buildDateRange(month, year);
 
     const records = await Attendance.find(filter)
       .populate('user', 'name employeeId designation')
@@ -257,10 +348,14 @@ exports.hodLeaveReport = async (req, res) => {
     const deptId = req.user.department?._id || req.user.department;
     if (!deptId) return sendError(res, 400, 'HOD department not assigned');
 
-    const { month, year, status } = req.query;
+    const { month, year, date, status } = req.query;
     const filter = { department: deptId };
     if (status) filter.status = status;
-    if (month && year) {
+    if (date) {
+      const targetDate = new Date(date);
+      filter.fromDate = { $lte: targetDate };
+      filter.toDate = { $gte: targetDate };
+    } else if (month && year) {
       const range = buildDateRange(month, year);
       filter.$or = [{ fromDate: range }, { toDate: range }];
     }
@@ -271,13 +366,33 @@ exports.hodLeaveReport = async (req, res) => {
 
     const statusCounts = { Pending: 0, Approved: 0, Rejected: 0, Cancelled: 0 };
     const typeCounts = {};
+    const uniqueStaffSet = new Set();
+    const approvedStaffSet = new Set();
+    let totalApprovedDays = 0;
+    let totalCalendarDays = 0;
+
     leaves.forEach((l) => {
       statusCounts[l.status] = (statusCounts[l.status] || 0) + 1;
       typeCounts[l.type] = (typeCounts[l.type] || 0) + 1;
+      const uid = l.user?._id?.toString() || l.user?.toString();
+      if (uid) uniqueStaffSet.add(uid);
+      if (l.status === 'Approved') {
+        if (uid) approvedStaffSet.add(uid);
+        totalApprovedDays += l.totalDays || 0;
+      }
+      totalCalendarDays += l.totalDays || 0;
     });
 
     return sendSuccess(res, 200, 'Department leave report retrieved', {
-      stats: { totalApplications: leaves.length, statusCounts, typeCounts },
+      stats: {
+        totalApplications: leaves.length,
+        totalStaffCount: uniqueStaffSet.size,
+        staffOnLeaveCount: approvedStaffSet.size,
+        statusCounts,
+        typeCounts,
+        totalApprovedDays,
+        totalCalendarDays,
+      },
       leaves,
     });
   } catch (err) {
@@ -360,15 +475,23 @@ exports.myLeaveReport = async (req, res) => {
     const statusCounts = { Pending: 0, Approved: 0, Rejected: 0, Cancelled: 0 };
     const typeCounts = {};
     let totalApproved = 0;
+    let totalCalendarDays = 0;
 
     leaves.forEach((l) => {
       statusCounts[l.status] = (statusCounts[l.status] || 0) + 1;
       typeCounts[l.type] = (typeCounts[l.type] || 0) + 1;
       if (l.status === 'Approved') totalApproved += l.totalDays || 0;
+      totalCalendarDays += l.totalDays || 0;
     });
 
     return sendSuccess(res, 200, 'Personal leave history retrieved', {
-      stats: { totalApplications: leaves.length, statusCounts, typeCounts, totalApprovedDays: totalApproved },
+      stats: {
+        totalApplications: leaves.length,
+        statusCounts,
+        typeCounts,
+        totalApprovedDays: totalApproved,
+        totalCalendarDays,
+      },
       leaves,
       leaveBalances: req.user.leaveBalances,
     });

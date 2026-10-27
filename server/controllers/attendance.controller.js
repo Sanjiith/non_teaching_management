@@ -1,7 +1,17 @@
 const Attendance = require('../models/Attendance.model');
 const User = require('../models/User.model');
+const Leave = require('../models/Leave.model');
+const Department = require('../models/Department.model');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { normalizeRole } = require('../middleware/role.middleware');
+const {
+  getAttendanceConfig,
+  updateAttendanceConfig,
+  isWithinCheckInWindow,
+  isBeforeCheckInWindow,
+  hasCheckInWindowClosed,
+  formatTime12Hour,
+} = require('../config/attendance.config');
 
 /**
  * Normalizes any Date string or Date object to midnight UTC (00:00:00.000Z)
@@ -17,15 +27,24 @@ const normalizeDateToUTC = (dateInput) => {
 const calculateAttendanceStats = (records) => {
   let presentDays = 0;
   let absentDays = 0;
-  let leaveDays = 0;
   let holidayDays = 0;
   let weeklyOffDays = 0;
+  let totalLeaveDays = 0;
+  const leaveGroups = new Set();
+  const staffOnLeaveSet = new Set();
 
   records.forEach((r) => {
     const s = r.status;
     if (s === 'Present') presentDays++;
     else if (s === 'Absent') absentDays++;
-    else if (s === 'Leave' || s === 'On-Leave') leaveDays++;
+    else if (s === 'Leave' || s === 'On-Leave') {
+      totalLeaveDays++;
+      const uid = r.user?._id?.toString() || r.user?.toString() || 'unknown';
+      staffOnLeaveSet.add(uid);
+      const match = r.remarks?.match(/Leave ID:\s*([a-f0-9]+)/i);
+      const leaveKey = match ? `${uid}_${match[1]}` : `${uid}_${r.date ? new Date(r.date).toISOString().split('T')[0] : Math.random()}`;
+      leaveGroups.add(leaveKey);
+    }
     else if (s === 'Holiday') holidayDays++;
     else if (s === 'Weekly Off') weeklyOffDays++;
   });
@@ -42,7 +61,10 @@ const calculateAttendanceStats = (records) => {
     totalRecords: records.length,
     presentDays,
     absentDays,
-    leaveDays,
+    leaveDays: totalLeaveDays,
+    totalLeaveDays,
+    leaveApplicationsCount: leaveGroups.size,
+    staffOnLeaveCount: staffOnLeaveSet.size,
     holidayDays,
     weeklyOffDays,
     attendanceRate,
@@ -133,6 +155,11 @@ const getDepartmentAttendance = async (req, res) => {
           $gte: new Date(Date.UTC(y, m, 1, 0, 0, 0, 0)),
           $lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999)),
         };
+      } else {
+        filter.date = {
+          $gte: new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0)),
+          $lte: new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999)),
+        };
       }
     }
 
@@ -194,6 +221,11 @@ const getAllAttendance = async (req, res) => {
         filter.date = {
           $gte: new Date(Date.UTC(y, m, 1, 0, 0, 0, 0)),
           $lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999)),
+        };
+      } else {
+        filter.date = {
+          $gte: new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0)),
+          $lte: new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999)),
         };
       }
     }
@@ -342,20 +374,29 @@ const markOrCorrectAttendance = async (req, res) => {
 const getAttendanceStats = async (req, res) => {
   try {
     const requesterRole = normalizeRole(req.user.role);
-    const today = normalizeDateToUTC(new Date());
-    const tomorrow = new Date(today);
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const { date } = req.query;
+    const targetDate = date ? normalizeDateToUTC(date) : normalizeDateToUTC(new Date());
+    const nextDate = new Date(targetDate);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
 
-    const filter = { date: { $gte: today, $lt: tomorrow } };
+    const filter = { date: { $gte: targetDate, $lt: nextDate } };
     let totalStaff = 0;
+    let hodDeptId = null;
 
     if (requesterRole === 'HOD') {
-      const hodDeptId = req.user.department?._id || req.user.department;
-      const deptUsers = await User.find({ department: hodDeptId }).select('_id');
+      hodDeptId = req.user.department?._id || req.user.department;
+      const deptUsers = await User.find({
+        department: hodDeptId,
+        role: { $in: ['Staff', 'Non-Teaching Staff'] },
+        isActive: true,
+      }).select('_id');
       filter.user = { $in: deptUsers.map((u) => u._id) };
       totalStaff = deptUsers.length;
     } else if (requesterRole === 'Admin') {
-      totalStaff = await User.countDocuments({ role: { $in: ['Staff', 'Non-Teaching Staff'] } });
+      totalStaff = await User.countDocuments({
+        role: { $in: ['Staff', 'Non-Teaching Staff'] },
+        isActive: true,
+      });
     } else {
       // Staff stats
       const myRecords = await Attendance.find({ user: req.user._id });
@@ -363,31 +404,631 @@ const getAttendanceStats = async (req, res) => {
       return sendSuccess(res, 200, 'Staff stats fetched', { stats });
     }
 
+    // 1. Fetch attendance records for target date
     const todayRecords = await Attendance.find(filter);
 
-    let presentToday = 0;
-    let absentToday = 0;
-    let onLeaveToday = 0;
+    const presentUserSet = new Set();
+    const absentUserSet = new Set();
+    const staffOnLeaveSet = new Set();
 
     todayRecords.forEach((r) => {
-      if (r.status === 'Present') presentToday++;
-      else if (r.status === 'Absent') absentToday++;
-      else if (r.status === 'Leave' || r.status === 'On-Leave') onLeaveToday++;
+      const uid = r.user?._id?.toString() || r.user?.toString();
+      if (!uid) return;
+      if (r.status === 'Present') {
+        presentUserSet.add(uid);
+      } else if (r.status === 'Absent') {
+        absentUserSet.add(uid);
+      } else if (r.status === 'Leave' || r.status === 'On-Leave') {
+        staffOnLeaveSet.add(uid);
+      }
     });
+
+    // 2. Fetch approved leaves overlapping target date (fromDate <= targetDate and toDate >= targetDate)
+    const approvedLeaveFilter = {
+      status: 'Approved',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: targetDate },
+    };
+    if (requesterRole === 'HOD' && hodDeptId) {
+      approvedLeaveFilter.department = hodDeptId;
+    }
+    const approvedLeavesToday = await Leave.find(approvedLeaveFilter).select('user');
+    approvedLeavesToday.forEach((l) => {
+      const uid = l.user?._id?.toString() || l.user?.toString();
+      if (uid) staffOnLeaveSet.add(uid);
+    });
+
+    // A user explicitly marked Present cannot be counted as on leave
+    presentUserSet.forEach((uid) => staffOnLeaveSet.delete(uid));
+
+    const presentToday = presentUserSet.size;
+    const absentToday = absentUserSet.size;
+    const onLeaveToday = staffOnLeaveSet.size;
+    const staffOnLeaveCount = staffOnLeaveSet.size;
+
+    // 3. Count unique leave requests by status according to scope
+    const leaveScopeFilter = {};
+    if (requesterRole === 'HOD' && hodDeptId) {
+      leaveScopeFilter.department = hodDeptId;
+    }
+    const [pendingLeavesCount, approvedLeavesCount, rejectedLeavesCount, totalLeaveApplications] = await Promise.all([
+      Leave.countDocuments({ ...leaveScopeFilter, status: 'Pending' }),
+      Leave.countDocuments({ ...leaveScopeFilter, status: 'Approved' }),
+      Leave.countDocuments({ ...leaveScopeFilter, status: 'Rejected' }),
+      Leave.countDocuments(leaveScopeFilter),
+    ]);
 
     const attendanceRateToday = totalStaff > 0
       ? Number(((presentToday / totalStaff) * 100).toFixed(1))
       : 0;
+
+    // 4. Department breakdown for Admin (dynamic from real DB data)
+    let departmentBreakdown = [];
+    if (requesterRole === 'Admin') {
+      const departments = await Department.find({}).sort({ code: 1 });
+      const allActiveStaff = await User.find({
+        role: { $in: ['Staff', 'Non-Teaching Staff'] },
+        isActive: true,
+      }).select('_id department');
+
+      const deptMap = {};
+      departments.forEach((d) => {
+        deptMap[d._id.toString()] = {
+          dept: d.code,
+          name: d.name,
+          total: 0,
+          present: 0,
+          absent: 0,
+          leave: 0,
+        };
+      });
+
+      allActiveStaff.forEach((u) => {
+        const dId = u.department?.toString();
+        if (dId && deptMap[dId]) {
+          deptMap[dId].total++;
+          const uid = u._id.toString();
+          if (presentUserSet.has(uid)) deptMap[dId].present++;
+          else if (absentUserSet.has(uid)) deptMap[dId].absent++;
+          else if (staffOnLeaveSet.has(uid)) deptMap[dId].leave++;
+        }
+      });
+
+      departmentBreakdown = Object.values(deptMap);
+    }
 
     return sendSuccess(res, 200, 'Stats fetched successfully', {
       totalStaff,
       presentToday,
       absentToday,
       onLeaveToday,
+      staffOnLeaveCount,
+      pendingLeavesCount,
+      approvedLeavesCount,
+      rejectedLeavesCount,
+      totalLeaveApplications,
       attendanceRateToday,
+      departmentBreakdown,
     });
   } catch (error) {
     return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * Automatically mark absent staff members for a specific date if check-in period has ended.
+ * Rules:
+ * 1. Only runs if the window has closed for targetDate (or targetDate is in the past).
+ * 2. Does NOT mark staff absent if they have an approved leave covering targetDate.
+ * 3. Does NOT overwrite existing records (e.g. Present, Leave, Holiday, Weekly Off).
+ * 4. Uses $setOnInsert with findOneAndUpdate to prevent duplicate records per user per day.
+ */
+const markAbsenteesForDate = async (targetDateInput) => {
+  try {
+    const targetDate = normalizeDateToUTC(targetDateInput);
+    const nowUTC = normalizeDateToUTC(new Date());
+
+    // Do not mark absent for future dates
+    if (targetDate > nowUTC) return { markedCount: 0 };
+
+    // For today, only mark absent if check-in window has closed
+    if (targetDate.getTime() === nowUTC.getTime() && !hasCheckInWindowClosed(new Date())) {
+      return { markedCount: 0 };
+    }
+
+    const nextDate = new Date(targetDate);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    // 1. Fetch all active non-teaching staff
+    const activeStaff = await User.find({
+      role: { $in: ['Staff', 'Non-Teaching Staff'] },
+      isActive: true,
+    }).select('_id employeeId name department');
+
+    if (activeStaff.length === 0) return { markedCount: 0 };
+
+    // 2. Fetch all existing attendance records for targetDate
+    const existingAttendance = await Attendance.find({
+      date: { $gte: targetDate, $lt: nextDate },
+    }).select('user status');
+
+    const existingAttMap = new Map();
+    existingAttendance.forEach((r) => {
+      existingAttMap.set(r.user.toString(), r);
+    });
+
+    // 3. Fetch all approved leaves covering targetDate
+    const approvedLeaves = await Leave.find({
+      status: 'Approved',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: targetDate },
+    }).select('user type');
+
+    const approvedLeaveUserMap = new Map();
+    approvedLeaves.forEach((l) => {
+      approvedLeaveUserMap.set(l.user.toString(), l);
+    });
+
+    let markedCount = 0;
+
+    for (const staff of activeStaff) {
+      const uid = staff._id.toString();
+
+      // 1. If staff has approved leave for this date, ensure Leave attendance record
+      if (approvedLeaveUserMap.has(uid)) {
+        const leave = approvedLeaveUserMap.get(uid);
+        const existingRec = existingAttMap.get(uid);
+
+        // Do not downgrade a Present check-in, but ensure any Absent or missing record is 'Leave'
+        if (!existingRec || existingRec.status !== 'Present') {
+          await Attendance.findOneAndUpdate(
+            { user: staff._id, date: targetDate },
+            {
+              $set: {
+                status: 'Leave',
+                remarks: `Approved ${leave.type || 'Leave'}`,
+              },
+              $setOnInsert: {
+                user: staff._id,
+                date: targetDate,
+                checkIn: null,
+                checkOut: null,
+              },
+            },
+            { upsert: true, new: true }
+          );
+        }
+        continue;
+      }
+
+      // 2. If already recorded in Attendance (Present, Holiday, Weekly Off, etc.), do not overwrite
+      if (existingAttMap.has(uid)) {
+        continue;
+      }
+
+      // 3. If no check-in and no approved leave, mark Absent
+      await Attendance.findOneAndUpdate(
+        { user: staff._id, date: targetDate },
+        {
+          $setOnInsert: {
+            user: staff._id,
+            date: targetDate,
+            status: 'Absent',
+            remarks: 'Auto-marked Absent: Check-in window closed without check-in',
+            checkIn: null,
+            checkOut: null,
+          },
+        },
+        { upsert: true, new: true }
+      );
+      markedCount++;
+    }
+
+    return { markedCount };
+  } catch (error) {
+    console.error('Error marking absentees:', error);
+    return { markedCount: 0, error: error.message };
+  }
+};
+
+/**
+ * @desc    Staff Check-In (Biometric alternative)
+ * @route   POST /api/attendance/check-in
+ * @access  Private (Staff, Non-Teaching Staff)
+ */
+const checkIn = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const now = new Date();
+    const todayUTC = normalizeDateToUTC(now);
+    const config = getAttendanceConfig();
+
+    // 1. Check if user already checked in today (single check-in per staff per day)
+    const existing = await Attendance.findOne({
+      user: userId,
+      date: todayUTC,
+    });
+
+    if (existing && (existing.status === 'Present' || existing.checkIn !== null)) {
+      const formattedTime = formatTime12Hour(existing.checkIn);
+      return sendError(
+        res,
+        400,
+        `You have already checked in today at ${formattedTime}. Duplicate check-ins are not permitted.`
+      );
+    }
+
+    // 2. Check if user is on approved leave today
+    const nextDate = new Date(todayUTC);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    const approvedLeave = await Leave.findOne({
+      user: userId,
+      status: 'Approved',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: todayUTC },
+    });
+
+    if (approvedLeave || (existing && existing.status === 'Leave')) {
+      return sendError(
+        res,
+        400,
+        `Cannot check in: You have an approved ${approvedLeave?.type || 'Leave'} for today.`
+      );
+    }
+
+    // 3. Time window validations
+    if (isBeforeCheckInWindow(now)) {
+      return sendError(
+        res,
+        400,
+        `Check-in period has not started yet. Today's check-in window is ${config.checkInStartTime} to ${config.checkInEndTime}.`
+      );
+    }
+
+    if (hasCheckInWindowClosed(now)) {
+      // Mark absentees since window has closed
+      await markAbsenteesForDate(todayUTC);
+      return sendError(
+        res,
+        400,
+        `Check-in window closed at ${config.checkInEndTime}. You have been marked Absent according to attendance rules.`
+      );
+    }
+
+    // 4. Record successful check-in
+    const attendance = await Attendance.findOneAndUpdate(
+      { user: userId, date: todayUTC },
+      {
+        $set: {
+          status: 'Present',
+          checkIn: now,
+          remarks: 'Self Check-In (Biometric alternative)',
+        },
+        $setOnInsert: {
+          user: userId,
+          date: todayUTC,
+        },
+      },
+      { upsert: true, new: true, runValidators: true }
+    ).populate('user', 'name employeeId staffId designation department');
+
+    const formattedTime = formatTime12Hour(now);
+
+    return sendSuccess(res, 200, 'Check-in successful! Attendance marked as Present.', {
+      attendance,
+      checkInTime: now,
+      checkInTimeFormatted: formattedTime,
+      status: 'Present',
+      date: todayUTC,
+    });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Get current user's attendance status and check-in time for today
+ * @route   GET /api/attendance/today
+ * @access  Private
+ */
+const getTodayAttendance = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const now = new Date();
+    const todayUTC = normalizeDateToUTC(now);
+    const config = getAttendanceConfig();
+
+    const isWindowClosed = hasCheckInWindowClosed(now);
+    const isWindowOpen = isWithinCheckInWindow(now);
+    const isBeforeWindow = isBeforeCheckInWindow(now);
+
+    // If window closed, ensure absence marking is up to date
+    if (isWindowClosed) {
+      await markAbsenteesForDate(todayUTC);
+    }
+
+    const nextDate = new Date(todayUTC);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    const attendance = await Attendance.findOne({
+      user: userId,
+      date: todayUTC,
+    }).populate('user', 'name employeeId designation department');
+
+    const approvedLeave = await Leave.findOne({
+      user: userId,
+      status: 'Approved',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: todayUTC },
+    });
+
+    let status = 'Pending Check-In';
+    let checkIn = null;
+    let remarks = '';
+
+    if (attendance) {
+      status = attendance.status;
+      checkIn = attendance.checkIn;
+      remarks = attendance.remarks || '';
+    } else if (approvedLeave) {
+      status = 'Leave';
+      remarks = `Approved ${approvedLeave.type}`;
+    } else if (isWindowClosed) {
+      status = 'Absent';
+      remarks = 'Check-in window closed';
+    }
+
+    const checkInFormatted = checkIn ? formatTime12Hour(checkIn) : null;
+    const canCheckIn = isWindowOpen && status !== 'Present' && status !== 'Leave';
+    const alreadyCheckedIn = status === 'Present' && checkIn !== null;
+
+    let windowStatusText = 'Window Open';
+    if (isBeforeWindow) {
+      windowStatusText = `Opens at ${config.checkInStartTime}`;
+    } else if (isWindowClosed) {
+      windowStatusText = `Closed at ${config.checkInEndTime}`;
+    } else {
+      windowStatusText = `Open until ${config.checkInEndTime}`;
+    }
+
+    return sendSuccess(res, 200, 'Today attendance status fetched', {
+      date: todayUTC,
+      status,
+      checkIn,
+      checkInFormatted,
+      remarks,
+      canCheckIn,
+      alreadyCheckedIn,
+      leaveDetails: approvedLeave || null,
+      window: {
+        startTime: config.checkInStartTime,
+        endTime: config.checkInEndTime,
+        timeZone: config.timeZone,
+        isOpen: isWindowOpen,
+        isBefore: isBeforeWindow,
+        isClosed: isWindowClosed,
+        statusText: windowStatusText,
+      },
+    });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Get daily attendance for non-teaching staff (Staff Directory + Attendance)
+ *          For HOD: restricted to own department only
+ *          For Admin: institute-wide across all departments with filters
+ * @route   GET /api/attendance/daily-staff
+ * @access  Private (HOD, Admin)
+ */
+const getDailyStaffAttendance = async (req, res) => {
+  try {
+    const userRole = normalizeRole(req.user.role);
+    if (userRole !== 'HOD' && userRole !== 'Admin') {
+      return sendError(res, 403, 'Access denied. Only HOD and Admin can access daily staff attendance.');
+    }
+
+    const { date, department, status, search } = req.query;
+    const now = new Date();
+    const todayUTC = normalizeDateToUTC(now);
+    const targetDate = date ? normalizeDateToUTC(date) : todayUTC;
+    const config = getAttendanceConfig();
+
+    const isTargetToday = targetDate.getTime() === todayUTC.getTime();
+    const isTargetPast = targetDate < todayUTC;
+    const isWindowClosed = isTargetPast || (isTargetToday && hasCheckInWindowClosed(now));
+
+    // If check-in window has closed for targetDate, trigger auto-absence marking
+    if (isWindowClosed) {
+      await markAbsenteesForDate(targetDate);
+    }
+
+    // Determine department scope
+    let hodDeptId = null;
+    const userFilter = {
+      role: { $in: ['Staff', 'Non-Teaching Staff'] },
+      isActive: true,
+    };
+
+    if (userRole === 'HOD') {
+      hodDeptId = req.user.department?._id || req.user.department;
+      if (!hodDeptId) {
+        return sendError(res, 400, 'HOD has no department assigned.');
+      }
+      userFilter.department = hodDeptId;
+    } else if (userRole === 'Admin') {
+      if (department && department !== 'all') {
+        userFilter.department = department;
+      }
+    }
+
+    // Search filter (name or employeeId)
+    if (search && search.trim()) {
+      const term = search.trim();
+      userFilter.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { employeeId: { $regex: term, $options: 'i' } },
+        { staffId: { $regex: term, $options: 'i' } },
+      ];
+    }
+
+    // Fetch staff members
+    const staffMembers = await User.find(userFilter)
+      .populate('department', 'name code')
+      .select('name employeeId staffId designation department email phone joiningDate basicSalary leaveBalances')
+      .sort({ employeeId: 1 });
+
+    const staffIds = staffMembers.map((s) => s._id);
+
+    // Fetch attendance for targetDate
+    const nextDate = new Date(targetDate);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    const attendanceRecords = await Attendance.find({
+      user: { $in: staffIds },
+      date: { $gte: targetDate, $lt: nextDate },
+    });
+
+    const attMap = new Map();
+    attendanceRecords.forEach((a) => {
+      attMap.set(a.user.toString(), a);
+    });
+
+    // Fetch approved leaves overlapping targetDate
+    const approvedLeaves = await Leave.find({
+      user: { $in: staffIds },
+      status: 'Approved',
+      fromDate: { $lt: nextDate },
+      toDate: { $gte: targetDate },
+    });
+
+    const leaveMap = new Map();
+    approvedLeaves.forEach((l) => {
+      leaveMap.set(l.user.toString(), l);
+    });
+
+    let presentCount = 0;
+    let absentCount = 0;
+    let leaveCount = 0;
+    let pendingCount = 0;
+
+    let items = staffMembers.map((staff) => {
+      const uid = staff._id.toString();
+      const att = attMap.get(uid);
+      const leave = leaveMap.get(uid);
+
+      let itemStatus = 'Pending Check-In';
+      let checkIn = null;
+      let checkOut = null;
+      let remarks = '';
+      let recordId = null;
+
+      if (att) {
+        itemStatus = att.status;
+        checkIn = att.checkIn;
+        checkOut = att.checkOut;
+        remarks = att.remarks || '';
+        recordId = att._id;
+      } else if (leave) {
+        itemStatus = 'Leave';
+        remarks = `Approved ${leave.type}`;
+      } else if (isWindowClosed) {
+        itemStatus = 'Absent';
+        remarks = 'Did not check in during attendance window';
+      } else {
+        itemStatus = 'Pending Check-In';
+        remarks = 'Attendance check-in pending';
+      }
+
+      if (itemStatus === 'Present') presentCount++;
+      else if (itemStatus === 'Absent') absentCount++;
+      else if (itemStatus === 'Leave') leaveCount++;
+      else if (itemStatus === 'Pending Check-In') pendingCount++;
+
+      return {
+        _id: staff._id,
+        recordId,
+        user: {
+          _id: staff._id,
+          name: staff.name,
+          employeeId: staff.employeeId || staff.staffId,
+          staffId: staff.staffId,
+          designation: staff.designation || 'Staff',
+          department: staff.department,
+          email: staff.email,
+          phone: staff.phone,
+          joiningDate: staff.joiningDate,
+          basicSalary: staff.basicSalary,
+          leaveBalances: staff.leaveBalances,
+        },
+        name: staff.name,
+        employeeId: staff.employeeId || staff.staffId,
+        department: staff.department,
+        designation: staff.designation || 'Staff',
+        date: targetDate,
+        dateFormatted: targetDate.toISOString().split('T')[0],
+        checkIn,
+        checkInFormatted: checkIn ? formatTime12Hour(checkIn) : '—',
+        checkOut,
+        status: itemStatus,
+        remarks,
+      };
+    });
+
+    // Apply status filter if provided
+    if (status && status !== 'all') {
+      items = items.filter((item) => item.status.toLowerCase() === status.toLowerCase());
+    }
+
+    return sendSuccess(res, 200, 'Daily staff attendance fetched successfully', {
+      date: targetDate,
+      dateFormatted: targetDate.toISOString().split('T')[0],
+      totalStaff: staffMembers.length,
+      filteredCount: items.length,
+      presentCount,
+      absentCount,
+      leaveCount,
+      pendingCount,
+      window: {
+        startTime: config.checkInStartTime,
+        endTime: config.checkInEndTime,
+        timeZone: config.timeZone,
+        isClosed: isWindowClosed,
+      },
+      records: items,
+    });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Get attendance configuration
+ * @route   GET /api/attendance/config
+ * @access  Private
+ */
+const getAttendanceConfigEndpoint = async (req, res) => {
+  try {
+    const config = getAttendanceConfig();
+    return sendSuccess(res, 200, 'Attendance config fetched', { config });
+  } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+/**
+ * @desc    Update attendance configuration (Admin only)
+ * @route   PUT /api/attendance/config
+ * @access  Private (Admin)
+ */
+const updateAttendanceConfigEndpoint = async (req, res) => {
+  try {
+    const updated = updateAttendanceConfig(req.body);
+    return sendSuccess(res, 200, 'Attendance config updated successfully', { config: updated });
+  } catch (error) {
+    return sendError(res, 400, error.message);
   }
 };
 
@@ -398,4 +1039,11 @@ module.exports = {
   getStaffAttendance,
   markOrCorrectAttendance,
   getAttendanceStats,
+  calculateAttendanceStats,
+  checkIn,
+  getTodayAttendance,
+  getDailyStaffAttendance,
+  getAttendanceConfigEndpoint,
+  updateAttendanceConfigEndpoint,
+  markAbsenteesForDate,
 };
